@@ -17,12 +17,11 @@ module.exports.config = {
 };
 
 // ====== Template settings ======
-const TEMPLATE_URL = "https://i.imgur.com/HLcK4ci.jpeg";
+const TEMPLATE_URL = "https://i.imgur.com/D3iBml2.jpeg";
 const REF_W = 1774;
 const REF_H = 887;
-// নতুন টেমপ্লেটের ফ্রেম অনুযায়ী পজিশন (দরকার হলে x, y, r ঠিক করে নিবেন)
-const LEFT  = { x: 483,  y: 360, r: 184 };
-const RIGHT = { x: 1280, y: 362, r: 186 };
+const LEFT  = { x: 430,  y: 396, r: 195 };
+const RIGHT = { x: 1370, y: 398, r: 195 };
 const CREDIT = "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐";
 // ================================
 
@@ -137,7 +136,6 @@ module.exports.run = async function ({ event, api }) {
   const cacheDir = path.join(__dirname, "cache");
   fs.ensureDirSync(cacheDir);
   const imgPath = path.join(cacheDir, `bro2_${senderID}_${targetID}.png`);
-  // আলাদা ক্যাশ নাম, যাতে bro5 এর পুরনো টেমপ্লেটের সাথে মিশে না যায়
   const templatePath = path.join(cacheDir, "bro2_template.jpg");
 
   const getTemplate = async () => {
