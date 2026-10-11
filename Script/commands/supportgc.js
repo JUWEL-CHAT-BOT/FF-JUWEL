@@ -14,7 +14,7 @@ const fs = require("fs");
 const path = require("path");
 
 module.exports.run = async function ({ api, event }) {
-  const supportGroupId = "737267832805258";
+  const supportGroupId = "1646660590151322";
   const supportLink = "https://m.me/j/AbZg4gx6-JZtRY6t/?send_source=gc%3Acopy_invite_link_c";
 
   const userID = event.senderID;
