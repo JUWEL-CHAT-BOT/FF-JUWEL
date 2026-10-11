@@ -19,14 +19,16 @@ const cooldown = new Map();
 const stats = new Map();
 const history = new Map();
 
-// ================= BASE API =================
+// ================= BASE API (MahMUD) =================
 async function getBaseApi() {
   try {
     const res = await axios.get(
-      "https://noobs-api-team-url.vercel.app/N1SA9/baseApiUrl.json"
+      "https://raw.githubusercontent.com/mahmudx7/HINATA/main/baseApiUrl.json"
     );
-    return res.data.rifat;
-  } catch {
+    // mahmud array থেকে প্রথম URL নিচ্ছি
+    return Array.isArray(res.data.mahmud) ? res.data.mahmud[0] : res.data.mahmud;
+  } catch (e) {
+    console.error("Base API fetch error:", e.message);
     return null;
   }
 }
@@ -35,10 +37,9 @@ async function getBaseApi() {
 function smartPrompt(text) {
   const t = text.toLowerCase();
 
-  // প্রি-ডিফাইনেড ম্যাপ (পুরোনো সব ফিচার + নতুন)
   const map = {
     // ===== মানুষ =====
-    "মেয়ে": "add a beautiful girl beside the person",
+    "মেয়ে": "add a beautiful girl beside the person",
     "ছেলে": "add a handsome boy beside the person",
     "বন্ধু": "add a friend beside the person",
     "পুলিশ": "add a police officer",
@@ -48,10 +49,10 @@ function smartPrompt(text) {
     "anime": "convert image to anime style",
     "কার্টুন": "convert image to cartoon style",
     "স্কেচ": "convert image to pencil sketch",
-    "অয়েল": "convert image to oil painting",
-    "ওয়াটার কালার": "convert image to watercolor",
+    "অয়েল": "convert image to oil painting",
+    "ওয়াটার কালার": "convert image to watercolor",
     
-    // ===== কোয়ালিটি =====
+    // ===== কোয়ালিটি =====
     "4k": "enhance image to ultra HD 4K quality",
     "hd": "enhance image quality",
     "hdr": "apply HDR effect",
@@ -63,36 +64,35 @@ function smartPrompt(text) {
     "জঙ্গল": "change background to forest",
     "স্পেস": "change background to space",
     "মাউন্টেন": "change background to mountain",
-    "পাহাড়": "change background to mountain",
+    "পাহাড়": "change background to mountain",
     "সিটি": "change background to city",
     "শহর": "change background to city",
     
     // ===== ইফেক্ট =====
-    "ফায়ার": "add fire effect",
+    "ফায়ার": "add fire effect",
     "আগুন": "add fire effect",
     "স্নো": "add snow effect",
     "বৃষ্টি": "add rain effect",
     "রেইন": "add rain effect",
     "এঞ্জেল": "add angel wings effect",
-    "নিয়ন": "add neon glow effect",
+    "নিয়ন": "add neon glow effect",
     "গ্লো": "add glow effect",
     "স্পার্কল": "add sparkle effect",
     "শ্যাডো": "add dramatic shadow effect",
     
     // ===== রিমুভ =====
     "ব্যাকগ্রাউন্ড রিমুভ": "remove background completely",
-    "ব্যাকগ্রাউন্ড রিমুভ": "remove background completely",
     "অবজেক্ট রিমুভ": "remove unwanted objects",
     "দাগ রিমুভ": "remove blemishes",
     
     // ===== কালার =====
-    "ব্ল্যাক অ্যান্ড হোয়াইট": "convert to black and white",
-    "সেপিয়া": "apply sepia tone",
+    "ব্ল্যাক অ্যান্ড হোয়াইট": "convert to black and white",
+    "সেপিয়া": "apply sepia tone",
     "ভিনটেজ": "apply vintage filter",
     "প্যাস্টেল": "apply pastel colors",
     "ভাইব্র্যান্ট": "enhance vibrant colors",
     
-    // ===== পুরোনো ফিচার =====
+    // ===== ইংরেজি কীওয়ার্ড =====
     "background remove": "remove background",
     "blur": "blur background",
     "beach": "change background beach",
@@ -106,14 +106,9 @@ function smartPrompt(text) {
     "neon": "neon glow effect"
   };
 
-  // প্রথমে চেক করি ম্যাপে আছে কিনা
   for (let key in map) {
-    if (t.includes(key)) {
-      return map[key];
-    }
+    if (t.includes(key)) return map[key];
   }
-
-  // যদি ম্যাপে না থাকে, তাহলে ইউজারের ইনপুটই ব্যবহার করি
   return text;
 }
 
@@ -141,13 +136,13 @@ module.exports.run = async function ({ api, event, args }) {
     return api.sendMessage(
       `╭─❍ AI EDIT MENU
 │
-│ 👤 PEOPLE: মেয়ে, ছেলে, বন্ধু, পুলিশ, সুপারহিরো
-│ 🎨 STYLES: anime, কার্টুন, স্কেচ, অয়েল, ওয়াটার কালার
+│ 👤 PEOPLE: মেয়ে, ছেলে, বন্ধু, পুলিশ, সুপারহিরো
+│ 🎨 STYLES: anime, কার্টুন, স্কেচ, অয়েল, ওয়াটার কালার
 │ ✨ QUALITY: 4k, hd, hdr
 │ 🌍 BG: বিচ, প্যারিস, ফরেস্ট, স্পেস, মাউন্টেন, সিটি
-│ 🔥 EFFECTS: ফায়ার, স্নো, বৃষ্টি, এঞ্জেল, নিয়ন, গ্লো
+│ 🔥 EFFECTS: ফায়ার, স্নো, বৃষ্টি, এঞ্জেল, নিয়ন, গ্লো
 │ 🗑 REMOVE: ব্যাকগ্রাউন্ড রিমুভ, অবজেক্ট রিমুভ, দাগ রিমুভ
-│ 🎨 COLORS: ব্ল্যাক অ্যান্ড হোয়াইট, সেপিয়া, ভিনটেজ, প্যাস্টেল
+│ 🎨 COLORS: ব্ল্যাক অ্যান্ড হোয়াইট, সেপিয়া, ভিনটেজ, প্যাস্টেল
 │
 │ 💡 Or write any custom prompt in English!
 ╰──────────────`,
@@ -169,11 +164,8 @@ module.exports.run = async function ({ api, event, args }) {
   }
 
   const imageUrl = event.messageReply.attachments[0].url;
-
-  // ===== SMART PROMPT PROCESSING =====
   const prompt = smartPrompt(promptRaw);
-  
-  // ডিবাগ: কনসোলে দেখানো হচ্ছে
+
   console.log(`📝 Original: ${promptRaw}`);
   console.log(`🎯 Processed: ${prompt}`);
 
@@ -192,28 +184,26 @@ module.exports.run = async function ({ api, event, args }) {
 
   try {
     const base = await getBaseApi();
-    if (!base) throw new Error("API not found");
+    if (!base) throw new Error("API base URL not found");
 
-    // ===== API CALL WITH CORRECT PARAMETERS =====
-    const apiUrl = `${base}/edit?url=${encodeURIComponent(imageUrl)}&p=${encodeURIComponent(prompt)}`;
-    
-    console.log(`🔗 API URL: ${apiUrl}`); // ডিবাগ
+    const apiUrl = `${base}/api/edit`;
+    console.log(`🔗 API URL: ${apiUrl}`);
 
-    const res = await axios.get(apiUrl, { timeout: 120000 });
+    // ===== POST REQUEST (MahMUD API) =====
+    const res = await axios.post(
+      apiUrl,
+      { prompt, imageUrl },
+      {
+        responseType: "arraybuffer",
+        timeout: 120000
+      }
+    );
 
-    if (!res.data.success) {
-      console.log("❌ API Response:", res.data);
-      throw new Error(res.data.message || "Edit failed");
-    }
-
-    // ===== DOWNLOAD EDITED IMAGE =====
-    const img = await axios.get(res.data.catbox_url, {
-      responseType: "arraybuffer"
-    });
-
-    const filePath = path.join(__dirname, "cache", `edit_${Date.now()}.png`);
-
-    await fs.writeFile(filePath, Buffer.from(img.data));
+    // ===== SAVE IMAGE =====
+    const cacheDir = path.join(__dirname, "cache");
+    await fs.ensureDir(cacheDir);
+    const filePath = path.join(cacheDir, `edit_${Date.now()}.jpg`);
+    await fs.writeFile(filePath, Buffer.from(res.data, "binary"));
 
     api.unsendMessage(loading.messageID);
 
@@ -247,7 +237,7 @@ module.exports.run = async function ({ api, event, args }) {
       },
       threadID,
       () => {
-        try { fs.unlinkSync(filePath); } catch(e) {}
+        try { fs.unlinkSync(filePath); } catch (e) {}
       },
       messageID
     );
