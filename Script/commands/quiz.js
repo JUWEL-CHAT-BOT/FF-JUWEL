@@ -6,7 +6,7 @@ module.exports.config = {
   name: "quiz",
   version: "5.1.0",
   hasPermssion: 0,
-  credits: "RUBISH API + Bangla Version by rX (Fixed v5.1)",
+  credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "বাংলা কুইজ + কয়েন + গিফট + স্পিন + টপ১০",
   usePrefix: false,
   commandCategory: "Game",
