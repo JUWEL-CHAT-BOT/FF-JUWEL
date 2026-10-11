@@ -1,6 +1,6 @@
 module.exports.config = {
   name: "bro6",
-  version: "5.0.0",
+  version: "5.1.0",
   hasPermssion: 0,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "Friendship Forever banner with target mention and random brotherhood caption",
@@ -20,7 +20,7 @@ module.exports.config = {
 const TEMPLATE_URL = "https://i.imgur.com/HLcK4ci.jpeg";
 const REF_W = 1774;
 const REF_H = 887;
-// নতুন টেমপ্লেটের ফ্রেম অনুযায়ী পজিশন (দরকার হলে x, y, r ঠিক করে নিবেন)
+// টেমপ্লেটের ফ্রেম অনুযায়ী পজিশন (দরকার হলে x, y, r ঠিক করে নিবেন)
 const LEFT  = { x: 483,  y: 360, r: 184 };
 const RIGHT = { x: 1280, y: 362, r: 186 };
 const CREDIT = "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐";
@@ -115,6 +115,14 @@ ${cap.l3}
   );
 }
 
+// ছবির ফাইল কি না (JPEG / PNG) যাচাই করার জন্য
+function isImageBuffer(buf) {
+  if (!buf || buf.length < 8) return false;
+  const jpeg = buf[0] === 0xff && buf[1] === 0xd8;
+  const png = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+  return jpeg || png;
+}
+
 module.exports.run = async function ({ event, api }) {
   const axios = require("axios");
   const fs = require("fs-extra");
@@ -140,33 +148,66 @@ module.exports.run = async function ({ event, api }) {
   // আলাদা ক্যাশ নাম, যাতে bro5 এর পুরনো টেমপ্লেটের সাথে মিশে না যায়
   const templatePath = path.join(cacheDir, "bro6_template.jpg");
 
+  const downloadTemplate = async () => {
+    const res = await axios.get(TEMPLATE_URL, {
+      responseType: "arraybuffer",
+      timeout: 30000,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Referer": "https://imgur.com/"
+      }
+    });
+    const buf = Buffer.from(res.data);
+    // Imgur ব্লক করলে HTML পেজ আসে, সেটা ছবি নয়, তাই সেভ করা যাবে না
+    if (!isImageBuffer(buf)) {
+      throw new Error("Imgur returned non-image data (blocked?)");
+    }
+    fs.writeFileSync(templatePath, buf);
+  };
+
   const getTemplate = async () => {
+    // আগের নষ্ট ক্যাশ ফাইল থাকলে মুছে ফেলা
+    if (fs.existsSync(templatePath)) {
+      const old = fs.readFileSync(templatePath);
+      if (!isImageBuffer(old)) fs.unlinkSync(templatePath);
+    }
+
     if (!fs.existsSync(templatePath)) {
       try {
-        const res = await axios.get(TEMPLATE_URL, {
-          responseType: "arraybuffer",
-          timeout: 30000,
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-            "Referer": "https://imgur.com/"
-          }
-        });
-        fs.writeFileSync(templatePath, Buffer.from(res.data));
+        await downloadTemplate();
       } catch (err) {
-        throw new Error("TEMPLATE download failed: " + (err.response?.status || err.message));
+        throw new Error(
+          "TEMPLATE download failed: " + (err.response?.status || err.message) +
+          " | নিজে ছবিটা ডাউনলোড করে cache/bro6_template.jpg নামে রাখুন"
+        );
       }
     }
-    return loadImage(templatePath);
+
+    try {
+      return await loadImage(templatePath);
+    } catch (e) {
+      try { fs.unlinkSync(templatePath); } catch (_) {}
+      throw new Error("Template file broken, আবার চেষ্টা করুন");
+    }
   };
 
   const getAvatar = async (uid) => {
-    const url = `https://graph.facebook.com/${uid}/picture?width=720&height=720&access_token=6628568379|c1e620fa708a1d5696fb991c1bde5662`;
-    try {
-      const res = await axios.get(url, { responseType: "arraybuffer", timeout: 20000 });
-      return loadImage(Buffer.from(res.data));
-    } catch (err) {
-      throw new Error("AVATAR download failed: " + (err.response?.status || err.message));
+    const urls = [
+      `https://graph.facebook.com/${uid}/picture?width=720&height=720&access_token=6628568379|c1e620fa708a1d5696fb991c1bde5662`,
+      `https://graph.facebook.com/${uid}/picture?width=720&height=720`
+    ];
+    let lastErr = null;
+    for (const url of urls) {
+      try {
+        const res = await axios.get(url, { responseType: "arraybuffer", timeout: 20000 });
+        const buf = Buffer.from(res.data);
+        if (!isImageBuffer(buf)) throw new Error("not an image");
+        return await loadImage(buf);
+      } catch (err) {
+        lastErr = err;
+      }
     }
+    throw new Error("AVATAR download failed: " + (lastErr?.response?.status || lastErr?.message));
   };
 
   try {
