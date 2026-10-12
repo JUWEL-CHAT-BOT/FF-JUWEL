@@ -1,136 +1,192 @@
-const fs = require("fs");
-const path = require("path");
 const axios = require("axios");
 const FormData = require("form-data");
-const { downloadFile } = require("../../utils/index");
+const path = require("path");
 
-module.exports.config = {
-  name: "catbox",
-  version: "1.1.0",
-  hasPermssion: 0,
-  credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
-  description: "Upload media to Catbox",
-  commandCategory: "media",
-  usages: "[reply to image/video/audio]",
-  cooldowns: 5
+const CATBOX_USERHASH = "7a49365abd762f85de0480728";
+const MAX_FILES = 10;
+const CATBOX_API = "https://catbox.moe/user/api.php";
+const LITTER_API = "https://litterbox.catbox.moe/resources/internals/api.php";
+const TIMEOUT = 120000;
+const TEMP_TIMES = ["1h", "12h", "24h", "72h"];
+
+const EXT_BY_TYPE = {
+	photo: ".jpg",
+	animated_image: ".gif",
+	video: ".mp4",
+	audio: ".mp3",
+	sticker: ".png"
 };
 
-const cacheDir = path.join(__dirname, "cache");
-if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+module.exports.config = {
+	name: "catbox",
+	version: "1.1.2",
+	hasPermssion: 0,
+	credits: "EryXenX",
+	description: "Upload files to Catbox and get direct links",
+	commandCategory: "media",
+	usages: "[reply file] | [url ...] | [1h|12h|24h|72h] (reply to a file)",
+	cooldowns: 10,
+	dependencies: {
+		"axios": "",
+		"form-data": ""
+	}
+};
 
-function getExt(type) {
-  switch (type) {
-    case "photo": return "jpg";
-    case "video": return "mp4";
-    case "audio": return "mp3";
-    case "animated_image": return "gif";
-    default: return "dat";
-  }
-}
+// ---------- helpers ----------
+const isLink = text => typeof text === "string" && /^https?:\/\/\S+$/.test(text.trim());
 
-module.exports.run = async ({ api, event }) => {
-  const { threadID, type, messageReply, messageID } = event;
+const guessName = (attachment, index) => {
+	let name = attachment.filename || "";
+	if (!path.extname(name)) {
+		let ext = "";
+		try {
+			ext = path.extname(new URL(attachment.url).pathname);
+		}
+		catch (e) {
+			ext = "";
+		}
+		if (!ext) ext = EXT_BY_TYPE[attachment.type] || ".bin";
+		name = `${name || `file_${Date.now()}_${index}`}${ext}`;
+	}
+	return name.replace(/[^\w.\-]/g, "_");
+};
 
-  if (
-    type !== "message_reply" ||
-    !messageReply.attachments ||
-    messageReply.attachments.length === 0
-  ) {
-    return api.sendMessage("❐ Please reply to a photo/video/audio file.", threadID, messageID);
-  }
+const nameFromUrl = (url, index) => {
+	let base = "";
+	try {
+		base = path.basename(new URL(url).pathname);
+	}
+	catch (e) {
+		base = "";
+	}
+	if (!base || !path.extname(base)) base = `file_${Date.now()}_${index}.bin`;
+	return base.replace(/[^\w.\-]/g, "_");
+};
 
-  let msg = "";
-  let index = 0;
+const readResult = data => {
+	const text = typeof data === "string" ? data.trim() : "";
+	if (isLink(text)) return text;
+	throw new Error(text || "Empty response from server");
+};
 
-  for (const data of messageReply.attachments) {
-    const filePath = path.join(
-      cacheDir,
-      `${Date.now()}_${index++}.${getExt(data.type)}`
-    );
+const uploadByUrl = async url => {
+	const form = new FormData();
+	form.append("reqtype", "urlupload");
+	if (CATBOX_USERHASH) form.append("userhash", CATBOX_USERHASH);
+	form.append("url", url);
+	const res = await axios.post(CATBOX_API, form, {
+		headers: form.getHeaders(),
+		timeout: TIMEOUT,
+		maxBodyLength: Infinity,
+		maxContentLength: Infinity
+	});
+	return readResult(res.data);
+};
 
-    try {
-      // Download
-      await downloadFile(data.url, filePath);
+const uploadBuffer = async (url, filename, tempTime) => {
+	const file = await axios.get(url, {
+		responseType: "arraybuffer",
+		timeout: TIMEOUT,
+		maxContentLength: Infinity
+	});
+	const buffer = Buffer.from(file.data);
 
-      if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) {
-        throw new Error("Downloaded file is empty or missing");
-      }
+	const form = new FormData();
+	form.append("reqtype", "fileupload");
+	if (tempTime) form.append("time", tempTime);
+	else if (CATBOX_USERHASH) form.append("userhash", CATBOX_USERHASH);
+	form.append("fileToUpload", buffer, { filename, knownLength: buffer.length });
 
-      // Upload (3 methods, falls back automatically)
-      const UA = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" };
-      const opts = { maxBodyLength: Infinity, maxContentLength: Infinity, timeout: 120000 };
-      const isLink = (r) => typeof r === "string" && r.trim().startsWith("http");
-      let result = null;
-      let lastErr = null;
+	const res = await axios.post(tempTime ? LITTER_API : CATBOX_API, form, {
+		headers: form.getHeaders(),
+		timeout: TIMEOUT,
+		maxBodyLength: Infinity,
+		maxContentLength: Infinity
+	});
+	return readResult(res.data);
+};
 
-      // 1) Catbox: file upload
-      try {
-        const form = new FormData();
-        form.append("reqtype", "fileupload");
-        form.append("fileToUpload", fs.createReadStream(filePath));
-        const r = await axios.post("https://catbox.moe/user/api.php", form, {
-          ...opts,
-          headers: { ...form.getHeaders(), ...UA }
-        });
-        if (isLink(r.data)) result = String(r.data).trim();
-        else throw new Error(String(r.data));
-      } catch (e) {
-        lastErr = e;
-        console.error("Catbox fileupload failed:", e.message, e.response?.status, e.response?.data);
-      }
+const uploadOne = async (source, tempTime) => {
+	if (!tempTime) {
+		try {
+			return await uploadByUrl(source.url);
+		}
+		catch (e) {
+			return await uploadBuffer(source.url, source.name, null);
+		}
+	}
+	return await uploadBuffer(source.url, source.name, tempTime);
+};
 
-      // 2) Catbox: URL upload (Catbox downloads it itself, so your server IP isn't used)
-      if (!result) {
-        try {
-          const form = new FormData();
-          form.append("reqtype", "urlupload");
-          form.append("url", data.url);
-          const r = await axios.post("https://catbox.moe/user/api.php", form, {
-            ...opts,
-            headers: { ...form.getHeaders(), ...UA }
-          });
-          if (isLink(r.data)) result = String(r.data).trim();
-          else throw new Error(String(r.data));
-        } catch (e) {
-          lastErr = e;
-          console.error("Catbox urlupload failed:", e.message, e.response?.status, e.response?.data);
-        }
-      }
+// ---------- main ----------
+module.exports.run = async function ({ api, event, args }) {
+	const { threadID, messageID } = event;
 
-      // 3) Litterbox (temporary hosting, 72h) as last resort
-      if (!result) {
-        try {
-          const form = new FormData();
-          form.append("reqtype", "fileupload");
-          form.append("time", "72h");
-          form.append("fileToUpload", fs.createReadStream(filePath));
-          const r = await axios.post(
-            "https://litterbox.catbox.moe/resources/internals/api.php",
-            form,
-            { ...opts, headers: { ...form.getHeaders(), ...UA } }
-          );
-          if (isLink(r.data)) result = String(r.data).trim() + " (72h)";
-          else throw new Error(String(r.data));
-        } catch (e) {
-          lastErr = e;
-          console.error("Litterbox failed:", e.message, e.response?.status, e.response?.data);
-        }
-      }
+	const send = (body) => new Promise(resolve => {
+		api.sendMessage(body, threadID, (err, info) => resolve(err ? null : info), messageID);
+	});
 
-      if (!result) throw lastErr || new Error("All upload methods failed");
-      msg += `${result}\n`;
-    } catch (err) {
-      console.error(
-        "Catbox error:",
-        err.message,
-        err.response?.status,
-        err.response?.data
-      );
-      msg += `❌ Upload failed: ${err.response?.status || err.message}\n`;
-    } finally {
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    }
-  }
+	const list = (args || []).slice();
+	let tempTime = null;
 
-  return api.sendMessage(msg.trim(), threadID, messageID);
+	if (list.length && TEMP_TIMES.includes(String(list[0]).toLowerCase()))
+		tempTime = String(list.shift()).toLowerCase();
+
+	const sources = [];
+
+	for (const item of list) {
+		if (isLink(item)) sources.push({ url: item.trim(), name: nameFromUrl(item, sources.length) });
+	}
+
+	if (!sources.length) {
+		const attachments = (event.messageReply && event.messageReply.attachments) || [];
+		attachments.forEach((att, i) => {
+			if (att && att.url) sources.push({ url: att.url, name: guessName(att, i) });
+		});
+	}
+
+	if (!sources.length)
+		return send(
+			"Reply to an image, video, audio or file, or send a direct link.\n" +
+			"Usage: /catbox | /catbox <url> | /catbox 1h|12h|24h|72h"
+		);
+
+	const picked = sources.slice(0, MAX_FILES);
+	const skipped = sources.length - picked.length;
+
+	const waiting = await send(`Uploading ${picked.length} file(s)${tempTime ? ` for ${tempTime}` : ""}...`);
+	const waitingID = waiting && waiting.messageID;
+
+	const lines = [];
+	let ok = 0;
+
+	for (let i = 0; i < picked.length; i++) {
+		try {
+			const link = await uploadOne(picked[i], tempTime);
+			ok++;
+			lines.push(picked.length > 1 ? `${i + 1}. ${link}` : link);
+		}
+		catch (e) {
+			const reason = String((e && e.message) || "failed").slice(0, 80);
+			lines.push(`${i + 1}. Failed (${reason})`);
+		}
+	}
+
+	let text = lines.join("\n");
+	if (tempTime && ok) text += `\n\nThese links expire in ${tempTime}.`;
+	if (skipped > 0) text += `\n\nSkipped ${skipped} file(s). Max ${MAX_FILES} per command.`;
+
+	if (waitingID && typeof api.editMessage === "function") {
+		try {
+			await new Promise((resolve, reject) => {
+				api.editMessage(text, waitingID, err => (err ? reject(err) : resolve()));
+			});
+			return;
+		}
+		catch (e) {
+			return send(text);
+		}
+	}
+
+	return send(text);
 };
