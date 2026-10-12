@@ -3,75 +3,122 @@ const path = require("path");
 
 module.exports.config = {
     name: "vip",
-    version: "1.0.0",
-    hasPermssion: 3, // ADMINBOT only
-    credits: "Rx Abdullah",
-    description: "Manage VIP mode & VIP users",
+    version: "1.1.0",
+    hasPermssion: 3, // শুধু ADMINBOT
+    credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
+    description: "ভিআইপি মোড ও ভিআইপি ইউজার ম্যানেজ করুন",
     commandCategory: "Admin",
-    usages: "[on|off|add|remove|list] <userID or reply>",
+    usages: "[on|off|add|remove|list|status] <userID / reply / mention>",
     cooldowns: 5
 };
 
+// ===== UI হেল্পার =====
+const LINE = "━━━━━━━━━━━━━━━━━━";
+const ui = (icon, title, body) =>
+    `╭${LINE}╮\n   ${icon} ${title}\n╰${LINE}╯\n${body ? body + "\n" : ""}\n✦ 乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐`;
+
 module.exports.run = async function ({ api, event, args }) {
-    const vipFilePath = path.join(__dirname, "../../Script/commands/cache/vip.json");
-    const vipModePath = path.join(__dirname, "../../Script/commands/cache/vipMode.json");
+    const { threadID, messageID } = event;
+    const cacheDir = path.join(__dirname, "../../Script/commands/cache");
+    const vipFilePath = path.join(cacheDir, "vip.json");
+    const vipModePath = path.join(cacheDir, "vipMode.json");
 
-    // ===== Helpers =====
+    const send = (msg) => api.sendMessage(msg, threadID, messageID);
+
+    // ===== ফাইল হেল্পার =====
+    const ensureDir = () => {
+        if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+    };
+
     const loadVIP = () => {
-        if (!fs.existsSync(vipFilePath)) return [];
-        return JSON.parse(fs.readFileSync(vipFilePath, "utf-8"));
-    }
+        try {
+            if (!fs.existsSync(vipFilePath)) return [];
+            const data = JSON.parse(fs.readFileSync(vipFilePath, "utf-8"));
+            return Array.isArray(data) ? data.map(String) : [];
+        } catch (e) {
+            return [];
+        }
+    };
 
-    const saveVIP = (list) => fs.writeFileSync(vipFilePath, JSON.stringify(list, null, 2), "utf-8");
+    const saveVIP = (list) => {
+        ensureDir();
+        fs.writeFileSync(vipFilePath, JSON.stringify(list, null, 2), "utf-8");
+    };
 
     const loadVIPMode = () => {
-        if (!fs.existsSync(vipModePath)) return false;
-        const data = JSON.parse(fs.readFileSync(vipModePath, "utf-8"));
-        return data.vipMode || false;
-    }
+        try {
+            if (!fs.existsSync(vipModePath)) return false;
+            const data = JSON.parse(fs.readFileSync(vipModePath, "utf-8"));
+            return Boolean(data.vipMode);
+        } catch (e) {
+            return false;
+        }
+    };
 
-    const saveVIPMode = (mode) => fs.writeFileSync(vipModePath, JSON.stringify({ vipMode: mode }, null, 2), "utf-8");
-    // ===== End helpers =====
+    const saveVIPMode = (mode) => {
+        ensureDir();
+        fs.writeFileSync(vipModePath, JSON.stringify({ vipMode: mode }, null, 2), "utf-8");
+    };
+    // ===== হেল্পার শেষ =====
 
     const subCommand = args[0]?.toLowerCase();
 
-    // Check for reply message if add/remove
+    if (!subCommand) {
+        return send(ui("🎀", "ভিআইপি কমান্ড",
+            "ব্যবহার:\n• vip on — ভিআইপি মোড চালু\n• vip off — ভিআইপি মোড বন্ধ\n• vip add <ID/রিপ্লাই/মেনশন>\n• vip remove <ID/রিপ্লাই/মেনশন>\n• vip list — ভিআইপি তালিকা\n• vip status — বর্তমান অবস্থা"));
+    }
+
+    // টার্গেট আইডি: আর্গুমেন্ট > রিপ্লাই > মেনশন
     let targetID = args[1];
     if (!targetID && event.messageReply) targetID = event.messageReply.senderID;
-
-    if (!subCommand) return api.sendMessage("Usage: vip [on|off|add|remove|list] <userID or reply>", event.threadID);
+    if (!targetID && event.mentions && Object.keys(event.mentions).length > 0) {
+        targetID = Object.keys(event.mentions)[0];
+    }
+    if (targetID) targetID = String(targetID);
 
     let vipList = loadVIP();
-    let vipMode = loadVIPMode();
 
-    switch(subCommand) {
+    switch (subCommand) {
         case "on":
             saveVIPMode(true);
-            return api.sendMessage("> 🎀\n𝐎𝐊 𝐎𝐧𝐥𝐲 𝐕𝐈𝐏 𝐮𝐬𝐞𝐫 𝐜𝐚𝐧 𝐮𝐬𝐞 𝐜𝐨𝐦𝐦𝐚𝐧𝐝", event.threadID);
+            return send(ui("✅", "ভিআইপি মোড চালু",
+                "এখন শুধুমাত্র 💎 ভিআইপি ইউজাররা কমান্ড ব্যবহার করতে পারবে।"));
 
         case "off":
             saveVIPMode(false);
-            return api.sendMessage("> 🎀\n𝐃𝐨𝐧𝐞 𝐚𝐥𝐥 𝐮𝐬𝐞𝐫 𝐜𝐚𝐧 𝐮𝐬𝐞 𝐜𝐨𝐦𝐦𝐚𝐧𝐝", event.threadID);
+            return send(ui("🔓", "ভিআইপি মোড বন্ধ",
+                "এখন সবাই কমান্ড ব্যবহার করতে পারবে।"));
+
+        case "status":
+            return send(ui("📊", "বর্তমান অবস্থা",
+                `• ভিআইপি মোড: ${loadVIPMode() ? "🟢 চালু" : "🔴 বন্ধ"}\n• মোট ভিআইপি: ${vipList.length} জন`));
 
         case "add":
-            if (!targetID) return api.sendMessage("> ❌\n𝐏𝐥𝐞𝐚𝐬𝐞 𝐩𝐫𝐨𝐯𝐢𝐝𝐞 𝐚 𝐮𝐬𝐞𝐫𝐈𝐃 𝐨𝐫 𝐫𝐞𝐩𝐥𝐲 𝐭𝐨 𝐚𝐝𝐝.", event.threadID);
-            if (vipList.includes(targetID)) return api.sendMessage("> ❌\n𝐔𝐬𝐞𝐫 𝐢𝐬 𝐚𝐥𝐫𝐞𝐚𝐝𝐲 𝐕𝐈𝐏.", event.threadID);
+            if (!targetID)
+                return send(ui("❌", "ত্রুটি", "দয়া করে ইউজার আইডি দিন, কাউকে রিপ্লাই করুন বা মেনশন করুন।"));
+            if (vipList.includes(targetID))
+                return send(ui("⚠️", "আগে থেকেই ভিআইপি", `আইডি: ${targetID}\nএই ইউজার আগে থেকেই ভিআইপি তালিকায় আছে।`));
             vipList.push(targetID);
             saveVIP(vipList);
-            return api.sendMessage(`✅ Added ${targetID} to VIP list.`, event.threadID);
+            return send(ui("💎", "ভিআইপি যোগ করা হয়েছে", `আইডি: ${targetID}\nসফলভাবে ভিআইপি তালিকায় যোগ করা হয়েছে।`));
 
         case "remove":
-            if (!targetID) return api.sendMessage("> ❌\n𝐏𝐫𝐨𝐯𝐢𝐝𝐞 𝐚 𝐮𝐬𝐞𝐫𝐈𝐃 𝐨𝐫 𝐫𝐞𝐩𝐥𝐲 𝐭𝐨 𝐫𝐞𝐦𝐨𝐯𝐞.", event.threadID);
-            if (!vipList.includes(targetID)) return api.sendMessage("> ❌\n 𝐔𝐬𝐞𝐫 𝐢𝐬 𝐧𝐨𝐭 𝐢𝐧 𝐕𝐈𝐏 𝐥𝐢𝐬𝐭.", event.threadID);
-            vipList = vipList.filter(id => id !== targetID);
+            if (!targetID)
+                return send(ui("❌", "ত্রুটি", "দয়া করে ইউজার আইডি দিন, কাউকে রিপ্লাই করুন বা মেনশন করুন।"));
+            if (!vipList.includes(targetID))
+                return send(ui("⚠️", "খুঁজে পাওয়া যায়নি", `আইডি: ${targetID}\nএই ইউজার ভিআইপি তালিকায় নেই।`));
+            vipList = vipList.filter((id) => id !== targetID);
             saveVIP(vipList);
-            return api.sendMessage(`✅ Removed ${targetID} from VIP list.`, event.threadID);
+            return send(ui("🗑️", "ভিআইপি সরানো হয়েছে", `আইডি: ${targetID}\nভিআইপি তালিকা থেকে সরিয়ে দেওয়া হয়েছে।`));
 
         case "list":
-            if (vipList.length === 0) return api.sendMessage("> 🎀\n𝐕𝐢𝐩 𝐥𝐢𝐬𝐭 𝐢𝐬 𝐞𝐦𝐩𝐭𝐲.", event.threadID);
-            return api.sendMessage(`📋 VIP Users:\n${vipList.join("\n")}`, event.threadID);
+            if (vipList.length === 0)
+                return send(ui("📋", "ভিআইপি তালিকা", "তালিকা এখন খালি।"));
+            return send(ui("📋", "ভিআইপি তালিকা",
+                vipList.map((id, i) => `${i + 1}. 💎 ${id}`).join("\n") + `\n\nমোট: ${vipList.length} জন`));
 
         default:
-            return api.sendMessage("Unknown subcommand. Usage: vip [on|off|add|remove|list] <userID or reply>", event.threadID);
+            return send(ui("❓", "অজানা সাব-কমান্ড",
+                "ব্যবহার: vip [on|off|add|remove|list|status] <ID/রিপ্লাই/মেনশন>"));
     }
 };
