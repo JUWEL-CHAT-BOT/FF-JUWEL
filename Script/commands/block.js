@@ -34,13 +34,11 @@ function loadBlock() {
   try {
     if (!fs.existsSync(BLOCK_FILE)) {
       fs.writeFileSync(BLOCK_FILE, JSON.stringify({}, null, 2));
-      console.log("📄 নতুন blockedUsers.json তৈরি করা হয়েছে");
+      console.log("📄 নতুন blockedUsers.json তৈরি করা হয়েছে");
       return;
     }
 
-    const data = JSON.parse(
-      fs.readFileSync(BLOCK_FILE, "utf8")
-    );
+    const data = JSON.parse(fs.readFileSync(BLOCK_FILE, "utf8"));
 
     global.data.userBlocked.clear();
 
@@ -48,16 +46,10 @@ function loadBlock() {
       global.data.userBlocked.set(id, data[id]);
     }
 
-    console.log(
-      `✅ Block data loaded: ${global.data.userBlocked.size} জন`
-    );
+    console.log(`✅ Block data loaded: ${global.data.userBlocked.size} জন`);
   } catch (error) {
     console.error("❌ Block data load error:", error);
-
-    fs.writeFileSync(
-      BLOCK_FILE,
-      JSON.stringify({}, null, 2)
-    );
+    fs.writeFileSync(BLOCK_FILE, JSON.stringify({}, null, 2));
   }
 }
 
@@ -66,20 +58,72 @@ function loadBlock() {
 // =========================
 function saveBlock() {
   try {
-    const obj = Object.fromEntries(
-      global.data.userBlocked
-    );
-
-    fs.writeFileSync(
-      BLOCK_FILE,
-      JSON.stringify(obj, null, 2)
-    );
-
-    console.log(
-      `💾 Block data saved: ${Object.keys(obj).length} জন`
-    );
+    const obj = Object.fromEntries(global.data.userBlocked);
+    fs.writeFileSync(BLOCK_FILE, JSON.stringify(obj, null, 2));
+    console.log(`💾 Block data saved: ${Object.keys(obj).length} জন`);
   } catch (error) {
     console.error("❌ Block data save error:", error);
+  }
+}
+
+// =========================
+// HELPERS
+// =========================
+
+// Messenger থেকে আসল block / unblock
+function messengerBlock(api, userID, shouldBlock) {
+  return new Promise((resolve) => {
+    if (typeof api.changeBlockedStatus !== "function") {
+      return resolve({
+        ok: false,
+        error: "আপনার fca ভার্সনে changeBlockedStatus নেই"
+      });
+    }
+    try {
+      api.changeBlockedStatus(userID, shouldBlock, (err) => {
+        if (err) {
+          return resolve({
+            ok: false,
+            error: err.error || err.message || String(err)
+          });
+        }
+        resolve({ ok: true });
+      });
+    } catch (e) {
+      resolve({ ok: false, error: e.message });
+    }
+  });
+}
+
+// ইউজারের নাম আনা
+function getUserName(api, uid) {
+  return new Promise((resolve) => {
+    try {
+      api.getUserInfo(uid, (err, info) => {
+        if (err || !info || !info[uid]) return resolve("অজানা");
+        resolve(info[uid].name || "অজানা");
+      });
+    } catch (e) {
+      resolve("অজানা");
+    }
+  });
+}
+
+function isAdmin(uid) {
+  return (
+    global.config &&
+    Array.isArray(global.config.ADMINBOT) &&
+    global.config.ADMINBOT.includes(String(uid))
+  );
+}
+
+function formatTime(ts) {
+  try {
+    return new Date(ts).toLocaleString("bn-BD", {
+      timeZone: "Asia/Dhaka"
+    });
+  } catch (e) {
+    return String(ts);
   }
 }
 
@@ -93,13 +137,12 @@ loadBlock();
 // =========================
 module.exports.config = {
   name: "block",
-  version: "1.0.0",
+  version: "2.0.0",
   hasPermssion: 2,
-  credits:
-    "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
-  description:
-    "Block users from sending messages to the bot",
+  credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
+  description: "Block users from Messenger and from using the bot",
   commandCategory: "admin",
+  usages: "block @user | block UID | unblock UID | block list",
   cooldowns: 3
 };
 
@@ -109,31 +152,13 @@ module.exports.config = {
 module.exports.handleEvent = async ({ event, api }) => {
   try {
     const senderID = event.senderID;
-
     if (!senderID) return;
 
-    // =========================
-    // BOT OWNER / ADMIN PROTECTION
-    // =========================
-    if (
-      global.config &&
-      global.config.ADMINBOT &&
-      global.config.ADMINBOT.includes(senderID)
-    ) {
-      return;
-    }
+    // Admin protection
+    if (isAdmin(senderID)) return;
 
-    // =========================
-    // CHECK BLOCK
-    // =========================
-    if (!global.data.userBlocked.has(String(senderID))) {
-      return;
-    }
-
-    /*
-      এখানে ইচ্ছা করে কোনো reply পাঠানো হচ্ছে না।
-      ফলে blocked user-এর message bot ignore করবে।
-    */
+    // Blocked হলে কিছুই করবে না (ignore)
+    if (!global.data.userBlocked.has(String(senderID))) return;
 
     return;
   } catch (error) {
@@ -145,52 +170,119 @@ module.exports.handleEvent = async ({ event, api }) => {
 // COMMAND
 // =========================
 module.exports.run = async ({ event, api, args }) => {
+  const { threadID, messageID, messageReply, mentions, senderID } = event;
+  const send = (msg) => api.sendMessage(msg, threadID, messageID);
+
   try {
-    const {
-      threadID,
-      messageID,
-      messageReply,
-      mentions
-    } = event;
+    // কমান্ডের নাম বের করা (prefix বাদ দিয়ে)
+    const fullMsg = (event.body || "").trim();
+    const prefix = (global.config && global.config.PREFIX) || "/";
+    let cmd = fullMsg.split(/\s+/)[0].toLowerCase();
+    if (cmd.startsWith(prefix.toLowerCase())) {
+      cmd = cmd.slice(prefix.length);
+    }
+    cmd = cmd.replace(/^\/+/, "");
 
-    const fullMsg = event.body || "";
+    // =========================
+    // LIST
+    // =========================
+    if (
+      cmd === "blocklist" ||
+      (cmd === "block" && (args[0] || "").toLowerCase() === "list")
+    ) {
+      if (global.data.userBlocked.size === 0) {
+        return send("📭 কোনো ইউজার Block করা নেই।");
+      }
 
-    const cmd = fullMsg
-      .split(" ")[0]
-      .toLowerCase();
+      let msg = `╔══════ BLOCK LIST ══════╗\n\n`;
+      let i = 1;
+      for (const [uid, d] of global.data.userBlocked) {
+        msg += `${i++}. 👤 ${d.userName || "অজানা"}\n`;
+        msg += `   🆔 ${uid}\n`;
+        msg += `   🕒 ${d.time ? formatTime(d.time) : "অজানা"}\n\n`;
+      }
+      msg += `📊 মোট: ${global.data.userBlocked.size} জন\n╚════════════════════╝`;
+      return send(msg);
+    }
 
     // =========================
     // TARGET ID
     // =========================
     let targetID = null;
+    let mentionName = null;
 
-    // 1️⃣ Reply
     if (messageReply) {
       targetID = messageReply.senderID;
-    }
-
-    // 2️⃣ Mention
-    else if (
-      mentions &&
-      Object.keys(mentions).length > 0
-    ) {
+    } else if (mentions && Object.keys(mentions).length > 0) {
       targetID = Object.keys(mentions)[0];
+      mentionName = String(mentions[targetID] || "").replace("@", "");
+    } else if (args.length > 0) {
+      targetID = args[0];
     }
 
-    // 3️⃣ UID
-    else if (args.length > 0) {
-      targetID = args[0];
+    // =========================
+    // UNBLOCK
+    // =========================
+    if (cmd === "unblock") {
+      if (!targetID) {
+        return send(
+          `╔════ UNBLOCK ════╗
+
+⚠️ ইউজার নির্বাচন করুন।
+
+📌 ব্যবহার:
+➜ unblock @user
+➜ unblock UID
+➜ মেসেজে Reply করে unblock
+
+╚═════════════════╝`
+        );
+      }
+
+      targetID = String(targetID);
+
+      if (!/^\d+$/.test(targetID)) {
+        return send("❌ সঠিক UID দিন!");
+      }
+
+      const oldData = global.data.userBlocked.get(targetID);
+
+      // Messenger থেকে unblock (লিস্টে না থাকলেও চেষ্টা করবে)
+      const result = await messengerBlock(api, targetID, false);
+
+      if (oldData) {
+        global.data.userBlocked.delete(targetID);
+        if (global.data.userBanned) global.data.userBanned.delete(targetID);
+        saveBlock();
+      }
+
+      if (!oldData && !result.ok) {
+        return send("⚠️ এই ইউজার Block লিস্টে নেই।");
+      }
+
+      return send(
+        `╔════ UNBLOCK ════╗
+
+✅ ইউজার Unblock করা হয়েছে!
+
+👤 নাম: ${(oldData && oldData.userName) || "অজানা"}
+🆔 UID: ${targetID}
+${
+  result.ok
+    ? "📨 Messenger: Unblock সম্পন্ন"
+    : `⚠️ Messenger: Unblock হয়নি (${result.error})`
+}
+
+╚═════════════════╝`
+      );
     }
 
     // =========================
     // BLOCK
     // =========================
-    if (
-      cmd === "block" ||
-      cmd === "/block"
-    ) {
+    if (cmd === "block") {
       if (!targetID) {
-        return api.sendMessage(
+        return send(
           `╔══════ BLOCK ══════╗
 
 ⚠️ ইউজার নির্বাচন করুন।
@@ -200,341 +292,105 @@ module.exports.run = async ({ event, api, args }) => {
 ➜ block @user
 ➜ block UID
 ➜ কোনো মেসেজে Reply করে block
+➜ block list (তালিকা দেখতে)
+➜ unblock UID
 
-╚══════════════════╝`,
-          threadID,
-          messageID
+╚══════════════════╝`
         );
       }
 
       targetID = String(targetID);
 
-      // UID validation
       if (!/^\d+$/.test(targetID)) {
-        return api.sendMessage(
-          "❌ সঠিক UID দিন!",
-          threadID,
-          messageID
-        );
+        return send("❌ সঠিক UID দিন!");
       }
 
-      // =========================
-      // ALREADY BLOCKED
-      // =========================
-      if (
-        global.data.userBlocked.has(targetID)
-      ) {
-        const oldData =
-          global.data.userBlocked.get(targetID);
+      // নিজেকে বা বটকে block করা যাবে না
+      const botID = api.getCurrentUserID ? String(api.getCurrentUserID()) : null;
+      if (targetID === String(senderID)) {
+        return send("❌ নিজেকে Block করা যাবে না!");
+      }
+      if (botID && targetID === botID) {
+        return send("❌ বট নিজেকে Block করতে পারবে না!");
+      }
 
-        return api.sendMessage(
+      // Admin protection
+      if (isAdmin(targetID)) {
+        return send("❌ Admin কে Block করা যাবে না!");
+      }
+
+      // Already blocked
+      if (global.data.userBlocked.has(targetID)) {
+        const oldData = global.data.userBlocked.get(targetID);
+
+        return send(
           `╔════ BLOCK ════╗
 
 ⚠️ এই ইউজার ইতিমধ্যে Block করা আছে!
 
-👤 নাম: ${
-            oldData.userName || "অজানা"
-          }
+👤 নাম: ${oldData.userName || "অজানা"}
 
 🆔 UID: ${targetID}
 
 👮 Block করেছেন:
+${oldData.by || "অজানা"}
+
+🕒 সময়:
+${oldData.time ? formatTime(oldData.time) : "অজানা"}
+
+╚═══════════════╝`
+        );
+      }
+
+      // নাম সংগ্রহ
+      const userName = mentionName || (await getUserName(api, targetID));
+      const adminName = await getUserName(api, String(senderID));
+
+      // 1) Messenger থেকে আসল Block
+      const result = await messengerBlock(api, targetID, true);
+
+      // 2) বটের লিস্টে যুক্ত
+      global.data.userBlocked.set(targetID, {
+        userName,
+        by: adminName,
+        byID: String(senderID),
+        time: Date.now(),
+        messengerBlocked: result.ok
+      });
+
+      // 3) বট যাতে কমান্ড না চালায়
+      if (!global.data.userBanned) global.data.userBanned = new Map();
+      global.data.userBanned.set(targetID, {
+        reason: "blocked",
+        dateAdded: Date.now()
+      });
+
+      saveBlock();
+
+      return send(
+        `╔════ BLOCK ════╗
+
+✅ ইউজার Block করা হয়েছে!
+
+👤 নাম: ${userName}
+🆔 UID: ${targetID}
+👮 Block করেছেন: ${adminName}
+
 ${
-            oldData.byName || "অজানা"
-          }
+  result.ok
+    ? "📨 Messenger: Block সম্পন্ন ✅"
+    : `⚠️ Messenger: Block হয়নি ❌\n📝 কারণ: ${result.error}\n(বটের লিস্টে যুক্ত হয়েছে, বট তাকে ignore করবে)`
+}
 
-╚══════════════╝`,
-          threadID,
-          messageID
-        );
-      }
-
-      // =========================
-      // USER INFO
-      // =========================
-      let userName = "অজানা";
-
-      try {
-        const userInfo =
-          await api.getUserInfo(targetID);
-
-        if (
-          userInfo &&
-          userInfo[targetID]
-        ) {
-          userName =
-            userInfo[targetID].name ||
-            "অজানা";
-        }
-      } catch (error) {
-        console.log(
-          "⚠️ User info পাওয়া যায়নি"
-        );
-      }
-
-      // =========================
-      // ADMIN NAME
-      // =========================
-      let byName = "অজানা";
-
-      try {
-        const adminInfo =
-          await api.getUserInfo(
-            event.senderID
-          );
-
-        if (
-          adminInfo &&
-          adminInfo[event.senderID]
-        ) {
-          byName =
-            adminInfo[event.senderID].name ||
-            "অজানা";
-        }
-      } catch (error) {
-        console.log(
-          "⚠️ Admin name পাওয়া যায়নি"
-        );
-      }
-
-      // =========================
-      // SAVE BLOCK
-      // =========================
-      const blockInfo = {
-        userName: userName,
-        by: event.senderID,
-        byName: byName,
-        time: Date.now()
-      };
-
-      global.data.userBlocked.set(
-        targetID,
-        blockInfo
-      );
-
-      saveBlock();
-
-      // =========================
-      // SUCCESS UI
-      // =========================
-      return api.sendMessage(
-        `╔══════ BLOCK ══════╗
-
-🚫 BLOCK SUCCESSFUL
-
-👤 ইউজার:
-${userName}
-
-🆔 UID:
-${targetID}
-
-👮 Block করেছেন:
-${byName}
-
-🕐 সময়:
-${new Date().toLocaleString(
-          "bn-BD"
-        )}
-
-📌 Status:
-🔴 BLOCKED
-
-🤖 এখন এই ইউজারের
-মেসেজ Bot গ্রহণ করবে না।
-
-╚══════════════════╝
-
-乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐`,
-        threadID,
-        messageID
+╚═══════════════╝`
       );
     }
-
-    // =========================
-    // UNBLOCK
-    // =========================
-    if (
-      cmd === "unblock" ||
-      cmd === "/unblock"
-    ) {
-      if (!targetID) {
-        return api.sendMessage(
-          "⚠️ UID / @mention / Reply দিন।",
-          threadID,
-          messageID
-        );
-      }
-
-      targetID = String(targetID);
-
-      if (
-        !global.data.userBlocked.has(
-          targetID
-        )
-      ) {
-        return api.sendMessage(
-          "⚠️ এই ইউজার Block করা নেই।",
-          threadID,
-          messageID
-        );
-      }
-
-      const blockInfo =
-        global.data.userBlocked.get(
-          targetID
-        );
-
-      global.data.userBlocked.delete(
-        targetID
-      );
-
-      saveBlock();
-
-      return api.sendMessage(
-        `╔════ UNBLOCK ════╗
-
-🟢 UNBLOCK SUCCESSFUL
-
-👤 ইউজার:
-${blockInfo.userName || "অজানা"}
-
-🆔 UID:
-${targetID}
-
-📌 Status:
-🟢 UNBLOCKED
-
-✅ এখন থেকে Bot-এর
-মেসেজ গ্রহণ করতে পারবে।
-
-╚══════════════════╝
-
-乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐`,
-        threadID,
-        messageID
-      );
-    }
-
-    // =========================
-    // BLOCK LIST
-    // =========================
-    if (
-      cmd === "blocklist" ||
-      cmd === "/blocklist"
-    ) {
-      const blockedUsers =
-        Array.from(
-          global.data.userBlocked.entries()
-        );
-
-      if (blockedUsers.length === 0) {
-        return api.sendMessage(
-          `╔══ BLOCK LIST ══╗
-
-📋 কোনো ইউজার Block করা নেই।
-
-╚════════════════╝`,
-          threadID,
-          messageID
-        );
-      }
-
-      let list =
-        `╔════ BLOCK LIST ════╗\n`;
-
-      let count = 1;
-
-      for (
-        const [id, data]
-        of blockedUsers
-      ) {
-        list += `
-${count}. 👤 ${
-          data.userName || "অজানা"
-        }
-🆔 ${id}
-👮 ${
-          data.byName || "অজানা"
-        }
-🕐 ${
-          new Date(
-            data.time
-          ).toLocaleString("bn-BD")
-        }
-━━━━━━━━━━━━━━`;
-
-        count++;
-      }
-
-      list += `
-╚════════════════════╝
-
-🔢 মোট Block:
-${blockedUsers.length}
-
-乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐`;
-
-      return api.sendMessage(
-        list,
-        threadID,
-        messageID
-      );
-    }
-
-    // =========================
-    // HELP / UI
-    // =========================
-    if (
-      cmd === "blockhelp" ||
-      cmd === "/blockhelp"
-    ) {
-      return api.sendMessage(
-        `╔════ BLOCK SYSTEM ════╗
-
-🚫 BLOCK COMMAND
-
-➜ block @user
-মেনশন করা ইউজার Block
-
-➜ block UID
-UID দিয়ে ইউজার Block
-
-➜ Reply করে block
-যে ইউজারের মেসেজে Reply
-করে command দিলে Block হবে
-
-🟢 UNBLOCK
-
-➜ unblock @user
-➜ unblock UID
-➜ Reply করে unblock
-
-📋 LIST
-
-➜ blocklist
-
-ℹ️ Block করা ইউজারের
-message Bot ignore করবে।
-
-╚════════════════════════╝
-
-👑 Credit:
-乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐`,
-        threadID,
-        messageID
-      );
-    }
-
   } catch (error) {
-    console.error(
-      "❌ Block command error:",
-      error
-    );
-
+    console.error("❌ Block run error:", error);
     return api.sendMessage(
-      "❌ Block command চালাতে সমস্যা হয়েছে।",
-      event.threadID,
-      event.messageID
+      "❌ কমান্ড চালাতে সমস্যা হয়েছে!",
+      threadID,
+      messageID
     );
   }
 };
