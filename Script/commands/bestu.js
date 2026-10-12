@@ -1,74 +1,229 @@
 module.exports.config = {
   name: "bestu",
-  version: "7.3.1",
+  version: "1.0.1",
   hasPermssion: 0,
-  credits: " Priyansh Rajput", 
-  description: "Get Pair From Mention",
-  commandCategory: "png",
-  usages: "[@mention]",
-  cooldowns: 5, 
+  credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
+  description: "Besti & Bestu banner with both users mentioned and random caption",
+  commandCategory: "banner",
+  usePrefix: true,
+  usages: "[@mention | reply]",
+  cooldowns: 40,
   dependencies: {
-      "axios": "",
-      "fs-extra": "",
-      "path": "",
-      "jimp": ""
+    "axios": "",
+    "fs-extra": "",
+    "path": "",
+    "canvas": ""
   }
 };
 
-module.exports.onLoad = async() => {
-  const { resolve } = global.nodemodule["path"];
-  const { existsSync, mkdirSync } = global.nodemodule["fs-extra"];
-  const { downloadFile } = global.utils;
-  const dirMaterial = __dirname + `/cache/canvas/`;
-  const path = resolve(__dirname, 'cache/canvas', 'bestu.png');
-  if (!existsSync(dirMaterial + "canvas")) mkdirSync(dirMaterial, { recursive: true });
-  if (!existsSync(path)) await downloadFile("https://i.imgur.com/RloX16v.jpg", path); 
+// ====== Template settings ======
+const TEMPLATE_URL = "https://i.imgur.com/0rHs0nB.jpeg";
+const REF_W = 1536;
+const REF_H = 1024;
+
+// বাম = BESTI (sender, গোলাপি ফ্রেম), ডান = BESTU (target, নীল ফ্রেম)
+// ছবি ঠিকমতো না বসলে শুধু এই x, y, rx, ry মান বদলাও
+// x, y = ফ্রেমের মাঝখান | rx = আড়াআড়ি রেডিয়াস | ry = লম্বালম্বি রেডিয়াস
+const LEFT = { x: 397, y: 393, rx: 196, ry: 196 };
+const RIGHT = { x: 1138, y: 398, rx: 197, ry: 197 };
+
+const CREDIT = "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐";
+// ================================
+
+// ====== Captions ======
+const CAPTIONS = [
+  `"5" 🌷💞🫀🫂🌸🌷
+পৃথিবীতে অনেক বন্ধু পাওয়া যায় 🫂
+কিন্তু বেস্টির মতো মনের মানুষ পাওয়া ভাগ্যের ব্যাপার 🌸
+তুই আমার জীবনের সেই ভাগ্য, যাকে আমি হারাতে চাই না 💞🫀`,
+
+  `"6" 🌷💞🫀🫂🌸🌷
+বেস্টি আর বেস্টুর সম্পর্কটা একটু আলাদা 🌷
+এখানে রাগ আছে, অভিমান আছে, আবার অনেক মায়াও আছে 🫂
+সবকিছুর পরেও আমরা যেন একে অপরের আপন থাকি 💞🌸`,
+
+  `"7" 🌷💞🫀🫂🌸🌷
+বেস্টু তুই আমার হাসির কারণ, মনের শান্তি 🫀
+তোর সাথে কথা বললেই মনটা ভালো হয়ে যায় 🌸
+তুই থাকিস পাশে, এটাই আমার ছোট্ট আবদার 💞🫂`,
+
+  `"8" 🌷💞🫀🫂🌸🌷
+সময় বদলাক, বদলে যাক চারপাশের মানুষ 🌸
+তবুও তোর প্রতি আমার মায়াটা যেন না বদলায় 🫂
+বেস্টি তুই থাকিস আমার জীবনের শেষ গল্প পর্যন্ত 💞🌷`,
+
+  `"9" 🌷💞🫀🫂🌸🌷
+আমার বেস্টু আমার কাছে নীল গোলাপের মতো সুন্দর 🌷
+যার মায়ায় মনটা বারবার আটকে যায় 💞
+তোর মতো একজনকে বন্ধু হিসেবে পাওয়া সত্যিই ভাগ্যের 🫀🌸`,
+
+  `"10" 🌷💞🫀🫂🌸🌷
+বেস্টি তুই থাকলে একাকিত্বও হার মেনে যায় 🫂
+তোর সাথে ছোট ছোট মুহূর্তগুলোও স্মৃতি হয়ে রয় 🌸
+বন্ধুত্বের এই বন্ধনটা থাকুক চিরকাল অটুট 💞🫀🌷`
+];
+
+// ====== Caption UI ======
+function buildBody(tag1, tag2, caption) {
+  return (
+`╔════════════════╗
+ 🫶 𝐁𝐄𝐒𝐓𝐈 🫂 𝐁𝐄𝐒𝐓𝐔 🎀
+╚═════════════════╝
+
+👤 ${tag1}
+💞 ${tag2}
+${caption ? `\n${caption}\n` : ""}
+━━━━━━━━━━━━━━━━━━━
+🪪 𝐂𝐫𝐞𝐝𝐢𝐭 ➤ ${CREDIT}
+━━━━━━━━━━━━━━━━━━━`
+  );
 }
 
-async function makeImage({ one, two }) {
-  const fs = global.nodemodule["fs-extra"];
-  const path = global.nodemodule["path"];
-  const axios = global.nodemodule["axios"]; 
-  const jimp = global.nodemodule["jimp"];
-  const __root = path.resolve(__dirname, "cache", "canvas");
+module.exports.run = async function ({ event, api }) {
+  const axios = require("axios");
+  const fs = require("fs-extra");
+  const path = require("path");
+  const crypto = require("crypto");
+  const { createCanvas, loadImage } = require("canvas");
 
-  let batgiam_img = await jimp.read(__root + "/bestu.png");
-  let pathImg = __root + `/batman${one}_${two}.png`;
-  let avatarOne = __root + `/avt_${one}.png`;
-  let avatarTwo = __root + `/avt_${two}.png`;
+  const { threadID, messageID, senderID, mentions, messageReply } = event;
 
-  let getAvatarOne = (await axios.get(`https://graph.facebook.com/${one}/picture?width=512&height=512&access_token=6628568379%7Cc1e620fa708a1d5696fb991c1bde5662`, { responseType: 'arraybuffer' })).data;
-  fs.writeFileSync(avatarOne, Buffer.from(getAvatarOne, 'utf-8'));
-
-  let getAvatarTwo = (await axios.get(`https://graph.facebook.com/${two}/picture?width=512&height=512&access_token=6628568379%7Cc1e620fa708a1d5696fb991c1bde5662`, { responseType: 'arraybuffer' })).data;
-  fs.writeFileSync(avatarTwo, Buffer.from(getAvatarTwo, 'utf-8'));
-
-  let circleOne = await jimp.read(await circle(avatarOne));
-  let circleTwo = await jimp.read(await circle(avatarTwo));
-  batgiam_img.composite(circleOne.resize(191, 191), 93, 111).composite(circleTwo.resize(190, 190), 434, 107);
-
-  let raw = await batgiam_img.getBufferAsync("image/png");
-
-  fs.writeFileSync(pathImg, raw);
-  fs.unlinkSync(avatarOne);
-  fs.unlinkSync(avatarTwo);
-
-  return pathImg;
-}
-async function circle(image) {
-  const jimp = require("jimp");
-  image = await jimp.read(image);
-  image.circle();
-  return await image.getBufferAsync("image/png");
-}
-
-module.exports.run = async function ({ event, api, args }) {    
-  const fs = global.nodemodule["fs-extra"];
-  const { threadID, messageID, senderID } = event;
-  const mention = Object.keys(event.mentions);
-  if (!mention[0]) return api.sendMessage("Kisi 1 ko mantion to kr tootiye 😅", threadID, messageID);
-  else {
-      const one = senderID, two = mention[0];
-      return makeImage({ one, two }).then(path => api.sendMessage({ body: "✧•❁𝐅𝐫𝐢𝐞𝐧𝐝𝐬𝐡𝐢𝐩❁•✧\n\n╔═══❖••° °••❖═══╗\n\n   𝐒𝐮𝐜𝐜𝐞𝐬𝐬𝐟𝐮𝐥 𝐏𝐚𝐢𝐫𝐢𝐧𝐠\n\n╚═══❖••° °••❖═══╝\n\n   ✶⊶⊷⊷❍⊶⊷⊷✶\n\n       👑𝐘𝐄 𝐋𝐄 𝐌𝐈𝐋 𝐆𝐀𝐈 ❤\n\n𝐓𝐄𝐑𝐈 𝐁𝐄𝐒𝐓𝐈𝐄 🩷\n\n   ✶⊶⊷⊷❍⊶⊷⊷✶", attachment: fs.createReadStream(path) }, threadID, () => fs.unlinkSync(path), messageID));
+  let targetID = null;
+  if (mentions && Object.keys(mentions).length > 0) {
+    targetID = Object.keys(mentions)[0];
+  } else if (messageReply && messageReply.senderID) {
+    targetID = messageReply.senderID;
   }
-}
+
+  if (!targetID) {
+    return api.sendMessage(
+      "⚠️ কাউকে মেনশন করো বা রিপ্লাই দাও!\n\nউদাহরণ: bestu @乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
+      threadID,
+      messageID
+    );
+  }
+
+  const cacheDir = path.join(__dirname, "cache");
+  fs.ensureDirSync(cacheDir);
+
+  const imgPath = path.join(cacheDir, `bestu_${senderID}_${targetID}.png`);
+
+  // লিংক বদলালে নতুন টেমপ্লেট আপনাআপনি ডাউনলোড হবে (পুরনো ক্যাশ ব্যবহার হবে না)
+  const urlHash = crypto.createHash("md5").update(TEMPLATE_URL).digest("hex").slice(0, 8);
+  const templatePath = path.join(cacheDir, `bestu_template_${urlHash}.jpg`);
+
+  const getTemplate = async () => {
+    if (!fs.existsSync(templatePath)) {
+      try {
+        const res = await axios.get(TEMPLATE_URL, {
+          responseType: "arraybuffer",
+          timeout: 30000,
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+            "Referer": "https://imgur.com/"
+          }
+        });
+        fs.writeFileSync(templatePath, Buffer.from(res.data));
+      } catch (err) {
+        throw new Error("TEMPLATE download failed: " + (err.response?.status || err.message));
+      }
+    }
+    return loadImage(templatePath);
+  };
+
+  const getAvatar = async (uid) => {
+    const url = `https://graph.facebook.com/${uid}/picture?width=720&height=720&access_token=6628568379|c1e620fa708a1d5696fb991c1bde5662`;
+    try {
+      const res = await axios.get(url, { responseType: "arraybuffer", timeout: 20000 });
+      return loadImage(Buffer.from(res.data));
+    } catch (err) {
+      throw new Error("AVATAR download failed: " + (err.response?.status || err.message));
+    }
+  };
+
+  try {
+    const [template, avatar1, avatar2] = await Promise.all([
+      getTemplate(),
+      getAvatar(senderID),
+      getAvatar(targetID)
+    ]);
+
+    const W = template.width;
+    const H = template.height;
+    const sx = W / REF_W;
+    const sy = H / REF_H;
+
+    const canvas = createCanvas(W, H);
+    const ctx = canvas.getContext("2d");
+
+    ctx.drawImage(template, 0, 0, W, H);
+
+    const drawAvatar = (img, c) => {
+      const cx = c.x * sx;
+      const cy = c.y * sy;
+      const rx = c.rx * sx;
+      const ry = c.ry * sy;
+
+      const w = rx * 2;
+      const h = ry * 2;
+
+      // ছবি বিকৃত না করে ফ্রেম ভরাতে সেন্টার-ক্রপ
+      const scale = Math.max(w / img.width, h / img.height);
+      const dw = img.width * scale;
+      const dh = img.height * scale;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+      ctx.closePath();
+      ctx.clip();
+      ctx.drawImage(img, cx - dw / 2, cy - dh / 2, dw, dh);
+      ctx.restore();
+    };
+
+    drawAvatar(avatar1, LEFT);
+    drawAvatar(avatar2, RIGHT);
+
+    fs.writeFileSync(imgPath, canvas.toBuffer("image/png"));
+
+    // both users' names for mention
+    let senderName = "User";
+    let targetName = "Friend";
+    try {
+      const info = await api.getUserInfo([senderID, targetID]);
+      senderName = info[senderID]?.name || senderName;
+      targetName = info[targetID]?.name || targetName;
+    } catch (_) {}
+
+    const tag1 = `@${senderName}`;
+    const tag2 = `@${targetName}`;
+
+    const caption = CAPTIONS.length
+      ? CAPTIONS[Math.floor(Math.random() * CAPTIONS.length)]
+      : "";
+
+    const body = buildBody(tag1, tag2, caption);
+
+    return api.sendMessage(
+      {
+        body,
+        mentions: [
+          { tag: tag1, id: senderID },
+          { tag: tag2, id: targetID }
+        ],
+        attachment: fs.createReadStream(imgPath)
+      },
+      threadID,
+      () => fs.unlink(imgPath, () => {}),
+      messageID
+    );
+  } catch (e) {
+    console.log("BESTU CMD ERROR:", e.response?.status, e.message);
+    return api.sendMessage(
+      "Error: " + (e.response?.status || e.message),
+      threadID,
+      messageID
+    );
+  }
+};
