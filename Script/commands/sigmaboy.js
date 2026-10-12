@@ -51,7 +51,10 @@ const videoList = [
 // ===== Paths =====
 const CACHE_DIR = path.join(__dirname, "cache", "sigmaboy_cache");
 const DATA_FILE = path.join(__dirname, "cache", "sigmaboy_data.json");
-try { fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch (e) {}
+
+try {
+  fs.mkdirSync(CACHE_DIR, { recursive: true });
+} catch (e) {}
 
 // ===== 💾 Persistent Ban Storage =====
 function loadBanned() {
@@ -89,6 +92,13 @@ function toBoldFont(text) {
     const i = normal.indexOf(ch);
     return i > -1 ? bold[i] : ch;
   }).join("");
+}
+
+// ===== File Size Formatter =====
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(2) + " MB";
 }
 
 // ===== Admin Check =====
@@ -175,8 +185,8 @@ function checkUser(api, threadID, replyID, senderID) {
   if (!global.client.sigmaboySpamTracker[senderID]) {
     global.client.sigmaboySpamTracker[senderID] = [];
   }
-  global.client.sigmaboySpamTracker[senderID] = global.client.sigmaboySpamTracker[senderID]
-    .filter(t => now - t < 60000);
+  global.client.sigmaboySpamTracker[senderID] =
+    global.client.sigmaboySpamTracker[senderID].filter(t => now - t < 60000);
   global.client.sigmaboySpamTracker[senderID].push(now);
 
   if (global.client.sigmaboySpamTracker[senderID].length > 5) {
@@ -193,7 +203,6 @@ function checkUser(api, threadID, replyID, senderID) {
   // ⏱️ Cooldown Check (15s)
   const lastUsed = global.client.sigmaboyCooldown[senderID] || 0;
   const remaining = 15 - Math.floor((now - lastUsed) / 1000);
-
   if (remaining > 0) {
     api.sendMessage(
       toBoldFont(`⏳ Please wait ${remaining}s before using this command again!`),
@@ -203,6 +212,7 @@ function checkUser(api, threadID, replyID, senderID) {
     return false;
   }
   global.client.sigmaboyCooldown[senderID] = now;
+
   return true;
 }
 
@@ -210,13 +220,37 @@ function checkUser(api, threadID, replyID, senderID) {
 async function sendVideo(api, threadID, replyID, senderID, index) {
   try {
     const file = await getVideoFile(index);
-    const bodyText = toBoldFont("Sigma Boy Video");
+    const sizeText = formatSize(fs.statSync(file).size);
+    const videoNumber = index + 1;
+
+    const bodyText =
+`🎬 ${toBoldFont("SIGMA VIDEO")} 🎬
+╔══════════════════════╗
+${toBoldFont("Total Videos")} : ${toBoldFont(String(videoList.length))}
+${toBoldFont("Video No")} : ${toBoldFont(`${videoNumber}/${videoList.length}`)}
+${toBoldFont("Video Size")} : ${toBoldFont(sizeText)}
+${toBoldFont("Cooldown")} : ${toBoldFont("15s")}
+${toBoldFont("Credit")} : 乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐
+${toBoldFont("React")} ❤️ ${toBoldFont("To Get Next Video")}
+╚══════════════════════╝`;
 
     api.sendMessage(
-      { body: bodyText, attachment: fs.createReadStream(file) },
+      {
+        body: bodyText,
+        attachment: fs.createReadStream(file)
+      },
       threadID,
-      (err) => {
+      (err, info) => {
         if (err) return console.log("Send error:", err);
+
+        // ❤️ রিঅ্যাকশন রেজিস্টার
+        if (info && info.messageID && global.client.handleReaction) {
+          global.client.handleReaction.push({
+            name: module.exports.config.name,
+            messageID: info.messageID,
+            author: senderID
+          });
+        }
       },
       replyID
     );
@@ -243,6 +277,7 @@ module.exports.run = async function ({ api, event, args }) {
         messageID
       );
     }
+
     const target = args[1];
     if (!target) {
       return api.sendMessage(
@@ -251,6 +286,7 @@ module.exports.run = async function ({ api, event, args }) {
         messageID
       );
     }
+
     if (!global.client.sigmaboyBanned[target]) {
       return api.sendMessage(
         toBoldFont("ℹ️ This user is not banned."),
@@ -258,10 +294,12 @@ module.exports.run = async function ({ api, event, args }) {
         messageID
       );
     }
+
     delete global.client.sigmaboyBanned[target];
     delete global.client.sigmaboySpamTracker[target];
     delete global.client.sigmaboyCooldown[target];
     saveBanned();
+
     return api.sendMessage(
       toBoldFont(`✅ Unbanned ${target}`),
       threadID,
@@ -301,4 +339,23 @@ module.exports.run = async function ({ api, event, args }) {
   }
 
   await sendVideo(api, threadID, messageID, senderID, index);
+};
+
+// ===== ❤️ Reaction → Next Video =====
+module.exports.handleReaction = async function ({ api, event, handleReaction }) {
+  // শুধু ❤️ রিঅ্যাকশনে কাজ করবে (রিঅ্যাকশন সরালে বা অন্য ইমোজিতে কিছু হবে না)
+  if (!event.reaction) return;
+  if (event.reaction.replace(/\uFE0F/g, "") !== "❤") return;
+
+  // শুধু যে কমান্ড দিয়েছে সে রিঅ্যাক্ট করলে কাজ করবে
+  if (String(event.userID) !== String(handleReaction.author)) return;
+
+  if (videoList.length === 0) return;
+
+  const { threadID, messageID, userID } = event;
+
+  if (!checkUser(api, threadID, messageID, userID)) return;
+
+  const index = pickIndex(threadID);
+  await sendVideo(api, threadID, messageID, userID, index);
 };
