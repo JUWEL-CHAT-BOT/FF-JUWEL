@@ -6,10 +6,50 @@ const dbPath = path.join(__dirname, "database.json");
 const logPath = path.join(__dirname, "log.json");
 const backupDir = path.join(__dirname, "backup");
 
+// ================= FONT (𝙰𝙱𝙲𝙳 monospace) =================
+function mono(str) {
+  return String(str).replace(/[A-Za-z0-9]/g, (c) => {
+    const code = c.codePointAt(0);
+    if (code >= 65 && code <= 90) return String.fromCodePoint(0x1d670 + code - 65);
+    if (code >= 97 && code <= 122) return String.fromCodePoint(0x1d68a + code - 97);
+    if (code >= 48 && code <= 57) return String.fromCodePoint(0x1d7f6 + code - 48);
+    return c;
+  });
+}
+
+
+// ================= UI HELPERS =================
+const LINE = "━━━━━━━━━━━━━━━━━━━";
+const THIN = "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄";
+
+function header(icon, title) {
+  return `┏${LINE}┓\n   ${icon}  ${mono(title)}\n┗${LINE}┛`;
+}
+
+function section(title) {
+  return `\n◤ ${mono(title)} ◢\n${THIN}`;
+}
+
+function pad(n) {
+  return String(n).padStart(2, "0");
+}
+
+function cmdList(cmds) {
+  return cmds.map((c, i) => `【${mono(pad(i + 1))}】 ➜ ${mono(c)}`).join("\n");
+}
+
+function footer(text) {
+  return `\n${THIN}\n💬 ${mono(text)}`;
+}
+
 // ================= DATABASE =================
 function getDB() {
-  if (!fs.existsSync(dbPath)) fs.writeFileSync(dbPath, "{}");
-  return JSON.parse(fs.readFileSync(dbPath));
+  try {
+    if (!fs.existsSync(dbPath)) fs.writeFileSync(dbPath, "{}");
+    return JSON.parse(fs.readFileSync(dbPath, "utf8") || "{}");
+  } catch (e) {
+    return {};
+  }
 }
 
 function saveDB(data) {
@@ -19,15 +59,17 @@ function saveDB(data) {
 // ================= LOG SYSTEM =================
 function logAction(data) {
   let logs = [];
-  if (fs.existsSync(logPath)) {
-    logs = JSON.parse(fs.readFileSync(logPath));
+  try {
+    if (fs.existsSync(logPath)) logs = JSON.parse(fs.readFileSync(logPath, "utf8") || "[]");
+  } catch (e) {
+    logs = [];
   }
 
   logs.push({
-    সময়: new Date().toLocaleString(),
-    কাজ: data.action,
-    ইউজার: data.user,
-    গ্রুপ: data.thread
+    time: new Date().toLocaleString(),
+    action: data.action,
+    user: data.user,
+    thread: data.thread
   });
 
   fs.writeFileSync(logPath, JSON.stringify(logs, null, 2));
@@ -35,18 +77,32 @@ function logAction(data) {
 
 // ================= COMMAND LIST =================
 function listCommands() {
-  return fs.readdirSync(COMMANDS_DIR)
-    .filter(f => f.endsWith(".js") && f !== path.basename(__filename))
-    .map(f => f.replace(/\.js$/, ""));
+  return fs
+    .readdirSync(COMMANDS_DIR)
+    .filter((f) => f.endsWith(".js") && f !== path.basename(__filename))
+    .map((f) => f.replace(/\.js$/, ""));
+}
+
+function getUptime() {
+  const uptime = process.uptime();
+  const h = Math.floor(uptime / 3600);
+  const m = Math.floor((uptime % 3600) / 60);
+  return `${h}h ${m}m`;
+}
+
+function isBanned(threadID, threadData) {
+  const db = getDB();
+  if (db[threadID] && typeof db[threadID].banned !== "undefined") return !!db[threadID].banned;
+  return !!(threadData && threadData.banned);
 }
 
 // ================= CONFIG =================
 module.exports.config = {
   name: "menu",
-  version: "4.0.0",
+  version: "4.1.0",
   hasPermssion: 1,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
-  description: "🔥 বাংলা প্রো কন্ট্রোল প্যানেল",
+  description: "Pro control panel",
   commandCategory: "system",
   usages: "menu",
   cooldowns: 2
@@ -54,29 +110,29 @@ module.exports.config = {
 
 // ================= MENU UI =================
 module.exports.run = async function ({ api, event, Threads }) {
-  const data = (await Threads.getData(event.threadID))?.data || {};
+  let data = {};
+  try {
+    data = (await Threads.getData(event.threadID))?.data || {};
+  } catch (e) {}
+
   const cmds = listCommands();
+  const banned = isBanned(event.threadID, data);
 
-  const uptime = process.uptime();
-  const h = Math.floor(uptime / 3600);
-  const m = Math.floor((uptime % 3600) / 60);
-
-  const menu = `
-╭━━━〔 🔥 বট কন্ট্রোল প্যানেল 〕━━━╮
-┃ 🟢 বট স্ট্যাটাস : ${data.banned ? "বন্ধ 🚫" : "চালু 🟢"}
-┃ 📦 কমান্ড সংখ্যা : ${cmds.length}
-┃ ⏱ আপটাইম : ${h} ঘন্টা ${m} মিনিট
-╰━━━━━━━━━━━━━━━━━━━━━━╯
-
-1️⃣ 📊 বট স্ট্যাটাস দেখাও
-2️⃣ 🧩 কমান্ড তালিকা
-3️⃣ 🗑️ কমান্ড ডিলিট করুন
-4️⃣ 🚫 এই চ্যাটে বট বন্ধ করুন
-5️⃣ 🟢 এই চ্যাটে বট চালু করুন
-6️⃣ ♻️ বট রিস্টার্ট করুন
-
-👉 নিচে অপশনের নম্বর লিখুন
-`;
+  const menu = [
+    header("🤖", "BOT CONTROL PANEL"),
+    section("INFO"),
+    `◈ ${mono("Status")}   ➜ ${banned ? mono("OFF") + " 🔴" : mono("ON") + " 🟢"}`,
+    `◈ ${mono("Commands")} ➜ ${mono(cmds.length)}`,
+    `◈ ${mono("Uptime")}   ➜ ${mono(getUptime())}`,
+    section("OPTIONS"),
+    `❶ 📊 ${mono("Bot status")}`,
+    `❷ 🧩 ${mono("Command list")}`,
+    `❸ 🗑️ ${mono("Delete command")}`,
+    `❹ 🔴 ${mono("Turn OFF in this chat")}`,
+    `❺ 🟢 ${mono("Turn ON in this chat")}`,
+    `❻ ♻️ ${mono("Restart bot")}`,
+    footer("Reply with an option number")
+  ].join("\n");
 
   return api.sendMessage(menu, event.threadID, (err, info) => {
     if (err) return;
@@ -95,35 +151,38 @@ module.exports.handleReply = async function ({ api, event, handleReply, Threads 
   if (event.senderID !== handleReply.author) return;
 
   const reply = (msg, cb) => api.sendMessage(msg, event.threadID, cb);
-  const data = (await Threads.getData(event.threadID))?.data || {};
+
+  let data = {};
+  try {
+    data = (await Threads.getData(event.threadID))?.data || {};
+  } catch (e) {}
 
   // ================= MENU =================
   if (handleReply.type === "menu") {
-    const choice = event.body.trim();
+    const choice = (event.body || "").trim();
 
     switch (choice) {
-
       // 📊 STATUS
       case "1": {
         const cmds = listCommands();
-        const uptime = process.uptime();
-        const h = Math.floor(uptime / 3600);
-        const m = Math.floor((uptime % 3600) / 60);
+        const banned = isBanned(event.threadID, data);
 
-        return reply(`
-📊 বট স্ট্যাটাস রিপোর্ট
-
-🟢 বট : ${data.banned ? "বন্ধ 🚫" : "চালু 🟢"}
-📦 কমান্ড : ${cmds.length}
-⏱ আপটাইম : ${h} ঘন্টা ${m} মিনিট
-`);
+        return reply(
+          [
+            header("📊", "BOT STATUS"),
+            section("DETAILS"),
+            `◈ ${mono("Bot")}      ➜ ${banned ? mono("OFF") + " 🔴" : mono("ON") + " 🟢"}`,
+            `◈ ${mono("Commands")} ➜ ${mono(cmds.length)}`,
+            `◈ ${mono("Uptime")}   ➜ ${mono(getUptime())}`
+          ].join("\n")
+        );
       }
 
       // 🧩 COMMAND LIST
       case "2": {
         const cmds = listCommands();
         return reply(
-          `🧩 কমান্ড তালিকা (${cmds.length})\n\n${cmds.map((c, i) => `${i + 1}. ${c}`).join("\n")}`
+          [header("🧩", "COMMAND LIST"), `\n◈ ${mono("Total")} ➜ ${mono(cmds.length)}`, THIN, cmdList(cmds)].join("\n")
         );
       }
 
@@ -132,8 +191,9 @@ module.exports.handleReply = async function ({ api, event, handleReply, Threads 
         const cmds = listCommands();
 
         return reply(
-          `🗑️ কোন কমান্ড ডিলিট করবেন?\n\n${cmds.map((c, i) => `${i + 1}. ${c}`).join("\n")}\n\n👉 নম্বর লিখুন`,
+          [header("🗑️", "DELETE COMMAND"), `\n${cmdList(cmds)}`, footer("Reply with the number to delete")].join("\n"),
           (err, info) => {
+            if (err) return;
             global.client.handleReply.push({
               name: module.exports.config.name,
               messageID: info.messageID,
@@ -152,13 +212,17 @@ module.exports.handleReply = async function ({ api, event, handleReply, Threads 
         db[event.threadID].banned = 1;
         saveDB(db);
 
-        logAction({
-          action: "বন্ধ করা হয়েছে",
-          user: event.senderID,
-          thread: event.threadID
-        });
+        try {
+          const t = (await Threads.getData(event.threadID)) || {};
+          const d = t.data || {};
+          d.banned = 1;
+          await Threads.setData(event.threadID, { data: d });
+          if (global.data && global.data.threadBanned) global.data.threadBanned.set(event.threadID, 1);
+        } catch (e) {}
 
-        return reply("🚫 এই গ্রুপে বট বন্ধ করা হয়েছে।");
+        logAction({ action: "Bot turned OFF", user: event.senderID, thread: event.threadID });
+
+        return reply(`🔴 ${mono("Bot has been turned OFF in this group.")}`);
       }
 
       // 🟢 UNBAN
@@ -168,41 +232,46 @@ module.exports.handleReply = async function ({ api, event, handleReply, Threads 
         db[event.threadID].banned = 0;
         saveDB(db);
 
-        logAction({
-          action: "চালু করা হয়েছে",
-          user: event.senderID,
-          thread: event.threadID
-        });
+        try {
+          const t = (await Threads.getData(event.threadID)) || {};
+          const d = t.data || {};
+          d.banned = 0;
+          await Threads.setData(event.threadID, { data: d });
+          if (global.data && global.data.threadBanned) global.data.threadBanned.delete(event.threadID);
+        } catch (e) {}
 
-        return reply("🟢 এই গ্রুপে বট চালু করা হয়েছে।");
+        logAction({ action: "Bot turned ON", user: event.senderID, thread: event.threadID });
+
+        return reply(`🟢 ${mono("Bot has been turned ON in this group.")}`);
       }
 
       // ♻️ RESTART
       case "6": {
-        return reply("♻️ বট রিস্টার্ট হচ্ছে...", () => {
+        return reply(`♻️ ${mono("Bot is restarting...")}`, () => {
           setTimeout(() => process.exit(1), 1200);
         });
       }
 
       default:
-        return reply("❌ ভুল অপশন দেওয়া হয়েছে");
+        return reply(`❌ ${mono("Invalid option")}`);
     }
   }
 
   // ================= DELETE PICK =================
   if (handleReply.type === "deletePick") {
-    const idx = parseInt(event.body) - 1;
+    const idx = parseInt(event.body, 10) - 1;
     const list = handleReply.cmds;
 
     if (isNaN(idx) || idx < 0 || idx >= list.length)
-      return api.sendMessage("❌ ভুল নম্বর", event.threadID);
+      return api.sendMessage(`❌ ${mono("Invalid number")}`, event.threadID);
 
     const name = list[idx];
 
     return api.sendMessage(
-      `⚠️ নিশ্চিত করুন\n\nফাইল: ${name}.js\n\nyes / no লিখুন`,
+      [header("⚠️", "CONFIRM DELETE"), `\n◈ ${mono("File")} ➜ ${mono(name + ".js")}`, footer("Type yes or no")].join("\n"),
       event.threadID,
       (err, info) => {
+        if (err) return;
         global.client.handleReply.push({
           name: module.exports.config.name,
           messageID: info.messageID,
@@ -216,36 +285,69 @@ module.exports.handleReply = async function ({ api, event, handleReply, Threads 
 
   // ================= CONFIRM DELETE =================
   if (handleReply.type === "confirmDelete") {
-    const ans = event.body.toLowerCase().trim();
+    const ans = (event.body || "").toLowerCase().trim();
     const name = handleReply.cmdName;
 
     if (!["yes", "y", "no", "n"].includes(ans))
-      return api.sendMessage("👉 yes বা no লিখুন", event.threadID);
+      return api.sendMessage(`👉 ${mono("Please type yes or no")}`, event.threadID);
 
     if (ans.startsWith("n"))
-      return api.sendMessage("❌ বাতিল করা হয়েছে", event.threadID);
+      return api.sendMessage(`❌ ${mono("Cancelled")}`, event.threadID);
 
     const safeName = path.basename(name, ".js");
+
+    if (safeName === "menu")
+      return api.sendMessage(`❌ ${mono("You cannot delete the menu command")}`, event.threadID);
+
     const filePath = path.join(COMMANDS_DIR, `${safeName}.js`);
 
-    // BACKUP
-    if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir);
-    if (fs.existsSync(filePath)) {
-      fs.copyFileSync(filePath, path.join(backupDir, `${safeName}.js`));
-    }
+    if (!fs.existsSync(filePath))
+      return api.sendMessage(
+        `❌ ${mono("File not found")}:\n${mono(filePath)}`,
+        event.threadID
+      );
 
     try {
+      // BACKUP
+      if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+      fs.copyFileSync(filePath, path.join(backupDir, `${safeName}.js`));
+
+      // DELETE
       fs.unlinkSync(filePath);
 
+      // VERIFY
+      if (fs.existsSync(filePath))
+        return api.sendMessage(
+          `❌ ${mono("File was not deleted (possible permission problem)")}`,
+          event.threadID
+        );
+
+      // REMOVE FROM MEMORY
+      try {
+        delete require.cache[require.resolve(filePath)];
+      } catch (_) {}
+
+      try {
+        if (global.client && global.client.commands) {
+          global.client.commands.delete(safeName);
+          for (const [key, cmd] of global.client.commands) {
+            if (cmd && cmd.config && cmd.config.name === safeName) global.client.commands.delete(key);
+          }
+        }
+      } catch (_) {}
+
       logAction({
-        action: "ডিলিট করা হয়েছে",
+        action: `Deleted command: ${safeName}.js`,
         user: event.senderID,
         thread: event.threadID
       });
 
-      return api.sendMessage(`🗑️ সফলভাবে ডিলিট করা হয়েছে: ${safeName}.js`, event.threadID);
+      return api.sendMessage(
+        [header("✅", "DELETED"), `\n◈ ${mono("File")}   ➜ ${mono(safeName + ".js")}`, `◈ ${mono("Backup")} ➜ ${mono("Saved")} 💾`].join("\n"),
+        event.threadID
+      );
     } catch (e) {
-      return api.sendMessage(`❌ সমস্যা হয়েছে: ${e.message}`, event.threadID);
+      return api.sendMessage(`❌ ${mono("Error")}: ${mono(e.message)}`, event.threadID);
     }
   }
 };
