@@ -1,9 +1,9 @@
 module.exports.config = {
   name: "bestu",
-  version: "1.0.1",
+  version: "1.0.0",
   hasPermssion: 0,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
-  description: "Besti & Bestu banner with both users mentioned and random caption",
+  description: "Bestu & Besti banner with both users mentioned and random caption",
   commandCategory: "banner",
   usePrefix: true,
   usages: "[@mention | reply]",
@@ -17,57 +17,34 @@ module.exports.config = {
 };
 
 // ====== Template settings ======
-const TEMPLATE_URL = "https://i.imgur.com/0rHs0nB.jpeg";
+const TEMPLATE_URL = "https://i.imgur.com/FLM9H9j.jpeg";
 const REF_W = 1536;
 const REF_H = 1024;
 
-// বাম = BESTI (sender, গোলাপি ফ্রেম), ডান = BESTU (target, নীল ফ্রেম)
+// বাম = BESTI (target), ডান = BESTU (sender)
 // ছবি ঠিকমতো না বসলে শুধু এই x, y, rx, ry মান বদলাও
 // x, y = ফ্রেমের মাঝখান | rx = আড়াআড়ি রেডিয়াস | ry = লম্বালম্বি রেডিয়াস
-const LEFT = { x: 397, y: 393, rx: 196, ry: 196 };
-const RIGHT = { x: 1138, y: 398, rx: 197, ry: 197 };
+const LEFT  = { x: 392,  y: 388, rx: 184, ry: 184 };
+const RIGHT = { x: 1135, y: 389, rx: 190, ry: 187 };
 
 const CREDIT = "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐";
 // ================================
 
 // ====== Captions ======
 const CAPTIONS = [
-  `"5" 🌷💞🫀🫂🌸🌷
-পৃথিবীতে অনেক বন্ধু পাওয়া যায় 🫂
-কিন্তু বেস্টির মতো মনের মানুষ পাওয়া ভাগ্যের ব্যাপার 🌸
-তুই আমার জীবনের সেই ভাগ্য, যাকে আমি হারাতে চাই না 💞🫀`,
-
-  `"6" 🌷💞🫀🫂🌸🌷
-বেস্টি আর বেস্টুর সম্পর্কটা একটু আলাদা 🌷
-এখানে রাগ আছে, অভিমান আছে, আবার অনেক মায়াও আছে 🫂
-সবকিছুর পরেও আমরা যেন একে অপরের আপন থাকি 💞🌸`,
-
-  `"7" 🌷💞🫀🫂🌸🌷
-বেস্টু তুই আমার হাসির কারণ, মনের শান্তি 🫀
-তোর সাথে কথা বললেই মনটা ভালো হয়ে যায় 🌸
-তুই থাকিস পাশে, এটাই আমার ছোট্ট আবদার 💞🫂`,
-
-  `"8" 🌷💞🫀🫂🌸🌷
-সময় বদলাক, বদলে যাক চারপাশের মানুষ 🌸
-তবুও তোর প্রতি আমার মায়াটা যেন না বদলায় 🫂
-বেস্টি তুই থাকিস আমার জীবনের শেষ গল্প পর্যন্ত 💞🌷`,
-
-  `"9" 🌷💞🫀🫂🌸🌷
-আমার বেস্টু আমার কাছে নীল গোলাপের মতো সুন্দর 🌷
-যার মায়ায় মনটা বারবার আটকে যায় 💞
-তোর মতো একজনকে বন্ধু হিসেবে পাওয়া সত্যিই ভাগ্যের 🫀🌸`,
-
-  `"10" 🌷💞🫀🫂🌸🌷
-বেস্টি তুই থাকলে একাকিত্বও হার মেনে যায় 🫂
-তোর সাথে ছোট ছোট মুহূর্তগুলোও স্মৃতি হয়ে রয় 🌸
-বন্ধুত্বের এই বন্ধনটা থাকুক চিরকাল অটুট 💞🫀🌷`
+  `"5" 🌷💞🫀🫂🌸🌷 পৃথিবীতে অনেক বন্ধু পাওয়া যায় 🫂 কিন্তু বেস্টুর মতো মনের মানুষ পাওয়া ভাগ্যের ব্যাপার 🌸 তুই আমার জীবনের সেই ভাগ্য, যাকে আমি হারাতে চাই না 💞🫀`,
+  `"6" 🌷💞🫀🫂🌸🌷 বেস্টু আর বেস্টির সম্পর্কটা একটু আলাদা 🌷 এখানে রাগ আছে, অভিমান আছে, আবার অনেক মায়াও আছে 🫂 সবকিছুর পরেও আমরা যেন একে অপরের আপন থাকি 💞🌸`,
+  `"7" 🌷💞🫀🫂🌸🌷 বেস্টি তুই আমার হাসির কারণ, মনের শান্তি 🫀 তোর সাথে কথা বললেই মনটা ভালো হয়ে যায় 🌸 তুই থাকিস পাশে, এটাই আমার ছোট্ট আবদার 💞🫂`,
+  `"8" 🌷💞🫀🫂🌸🌷 সময় বদলাক, বদলে যাক চারপাশের মানুষ 🌸 তবুও তোর প্রতি আমার মায়াটা যেন না বদলায় 🫂 বেস্টু তুই থাকিস আমার জীবনের শেষ গল্প পর্যন্ত 💞🌷`,
+  `"9" 🌷💞🫀🫂🌸🌷 আমার বেস্টি আমার কাছে গোলাপের মতো সুন্দর 🌷 যার মায়ায় মনটা বারবার আটকে যায় 💞 তোর মতো একজনকে বন্ধু হিসেবে পাওয়া সত্যিই ভাগ্যের 🫀🌸`,
+  `"10" 🌷💞🫀🫂🌸🌷 বেস্টু তুই থাকলে একাকিত্বও হার মেনে যায় 🫂 তোর সাথে ছোট ছোট মুহূর্তগুলোও স্মৃতি হয়ে রয় 🌸 বন্ধুত্বের এই বন্ধনটা থাকুক চিরকাল অটুট 💞🫀🌷`
 ];
 
 // ====== Caption UI ======
 function buildBody(tag1, tag2, caption) {
   return (
 `╔════════════════╗
- 🫶 𝐁𝐄𝐒𝐓𝐈 🫂 𝐁𝐄𝐒𝐓𝐔 🎀
+ 🫶 𝐁𝐄𝐒𝐓𝐔 🫂 𝐁𝐄𝐒𝐓𝐈 🎀
 ╚═════════════════╝
 
 👤 ${tag1}
@@ -83,7 +60,6 @@ module.exports.run = async function ({ event, api }) {
   const axios = require("axios");
   const fs = require("fs-extra");
   const path = require("path");
-  const crypto = require("crypto");
   const { createCanvas, loadImage } = require("canvas");
 
   const { threadID, messageID, senderID, mentions, messageReply } = event;
@@ -107,10 +83,8 @@ module.exports.run = async function ({ event, api }) {
   fs.ensureDirSync(cacheDir);
 
   const imgPath = path.join(cacheDir, `bestu_${senderID}_${targetID}.png`);
-
-  // লিংক বদলালে নতুন টেমপ্লেট আপনাআপনি ডাউনলোড হবে (পুরনো ক্যাশ ব্যবহার হবে না)
-  const urlHash = crypto.createHash("md5").update(TEMPLATE_URL).digest("hex").slice(0, 8);
-  const templatePath = path.join(cacheDir, `bestu_template_${urlHash}.jpg`);
+  // নতুন নামের ক্যাশ ফাইল, যাতে পুরনো টেমপ্লেটের সাথে মিশে না যায়
+  const templatePath = path.join(cacheDir, "bestu_template_new.jpg");
 
   const getTemplate = async () => {
     if (!fs.existsSync(templatePath)) {
@@ -119,8 +93,7 @@ module.exports.run = async function ({ event, api }) {
           responseType: "arraybuffer",
           timeout: 30000,
           headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
             "Referer": "https://imgur.com/"
           }
         });
@@ -143,7 +116,7 @@ module.exports.run = async function ({ event, api }) {
   };
 
   try {
-    const [template, avatar1, avatar2] = await Promise.all([
+    const [template, avatarSender, avatarTarget] = await Promise.all([
       getTemplate(),
       getAvatar(senderID),
       getAvatar(targetID)
@@ -156,7 +129,6 @@ module.exports.run = async function ({ event, api }) {
 
     const canvas = createCanvas(W, H);
     const ctx = canvas.getContext("2d");
-
     ctx.drawImage(template, 0, 0, W, H);
 
     const drawAvatar = (img, c) => {
@@ -164,7 +136,6 @@ module.exports.run = async function ({ event, api }) {
       const cy = c.y * sy;
       const rx = c.rx * sx;
       const ry = c.ry * sy;
-
       const w = rx * 2;
       const h = ry * 2;
 
@@ -182,8 +153,9 @@ module.exports.run = async function ({ event, api }) {
       ctx.restore();
     };
 
-    drawAvatar(avatar1, LEFT);
-    drawAvatar(avatar2, RIGHT);
+    // বাম = BESTI (target), ডান = BESTU (sender)
+    drawAvatar(avatarTarget, LEFT);
+    drawAvatar(avatarSender, RIGHT);
 
     fs.writeFileSync(imgPath, canvas.toBuffer("image/png"));
 
