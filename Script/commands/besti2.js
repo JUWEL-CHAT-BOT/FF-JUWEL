@@ -155,6 +155,56 @@ module.exports.run = async function ({ event, api }) {
 
     ctx.drawImage(template, 0, 0, W, H);
 
+    // টেমপ্লেটের সাদা গোল ফাঁকা জায়গা নিজে থেকেই খুঁজে বের করে (ফ্লাড-ফিল)
+    // তাই ছবির সাইজ বা পজিশন হাতে মেলাতে হয় না
+    const detectFrame = (seed) => {
+      try {
+        const data = ctx.getImageData(0, 0, W, H).data;
+        const isWhite = (i) => data[i] >= 235 && data[i + 1] >= 235 && data[i + 2] >= 235;
+        const sxp = Math.round(seed.x * sx);
+        const syp = Math.round(seed.y * sy);
+        if (!isWhite((syp * W + sxp) * 4)) return null;
+
+        const visited = new Uint8Array(W * H);
+        const stack = [syp * W + sxp];
+        visited[syp * W + sxp] = 1;
+        let minX = W, maxX = 0, minY = H, maxY = 0, count = 0;
+
+        while (stack.length) {
+          const p = stack.pop();
+          const x = p % W;
+          const y = (p - x) / W;
+          count++;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+          if (x > 0 && !visited[p - 1] && isWhite((p - 1) * 4)) { visited[p - 1] = 1; stack.push(p - 1); }
+          if (x < W - 1 && !visited[p + 1] && isWhite((p + 1) * 4)) { visited[p + 1] = 1; stack.push(p + 1); }
+          if (y > 0 && !visited[p - W] && isWhite((p - W) * 4)) { visited[p - W] = 1; stack.push(p - W); }
+          if (y < H - 1 && !visited[p + W] && isWhite((p + W) * 4)) { visited[p + W] = 1; stack.push(p + W); }
+        }
+
+        const bw = maxX - minX + 1;
+        const bh = maxY - minY + 1;
+        // খুব ছোট বা ভুল এলাকা হলে বাদ
+        if (count < (W * H) * 0.01 || bw > W * 0.4 || bh > H * 0.5) return null;
+
+        const pad = 3; // কিনারায় সাদা দাগ ঢাকতে সামান্য বড় করা
+        return {
+          x: (minX + maxX) / 2 / sx,
+          y: (minY + maxY) / 2 / sy,
+          rx: (bw / 2 + pad) / sx,
+          ry: (bh / 2 + pad) / sy
+        };
+      } catch (_) {
+        return null;
+      }
+    };
+
+    const leftFrame = detectFrame(LEFT) || LEFT;
+    const rightFrame = detectFrame(RIGHT) || RIGHT;
+
     const drawAvatar = (img, c) => {
       const cx = c.x * sx;
       const cy = c.y * sy;
@@ -177,8 +227,8 @@ module.exports.run = async function ({ event, api }) {
       ctx.restore();
     };
 
-    drawAvatar(avatar1, LEFT);
-    drawAvatar(avatar2, RIGHT);
+    drawAvatar(avatar1, leftFrame);
+    drawAvatar(avatar2, rightFrame);
 
     fs.writeFileSync(imgPath, canvas.toBuffer("image/png"));
 
