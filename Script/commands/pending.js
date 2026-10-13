@@ -1,4 +1,3 @@
-// ===== pending.js =====
 const fs = require("fs-extra");
 const path = require("path");
 
@@ -6,7 +5,7 @@ const ADDER_CACHE_FILE = path.join(__dirname, "adderCache.json");
 
 module.exports.config = {
   name: "pending",
-  version: "1.2.0",
+  version: "1.3.0",
   credits: "𝐌𝐑 𝐉𝐔𝐖𝐄𝐋",
   hasPermssion: 2,
   description: "Manage bot's pending group requests",
@@ -66,6 +65,60 @@ function loadAdderCache() {
     }
   } catch (e) {}
   return {};
+}
+
+// ===================================================
+// কে অ্যাড করেছে সেটা বের করার ফাংশন
+// ক্রম: cache -> snippetSender -> approvalQueue -> adminIDs
+// ===================================================
+async function resolveAdder(api, group, adderCache) {
+  const botID = String(api.getCurrentUserID());
+  let id = null;
+  let name = null;
+
+  // 1) cache
+  const cached = adderCache[group.threadID];
+  if (cached && cached.id) {
+    id = String(cached.id);
+    name = cached.name || null;
+  }
+
+  // 2) thread list এর snippetSender (শেষ লগ মেসেজের প্রেরক)
+  if (!id && group.snippetSender && String(group.snippetSender) !== botID) {
+    id = String(group.snippetSender);
+  }
+
+  // 3) threadInfo: approvalQueue -> adminIDs
+  if (!id) {
+    try {
+      const info = await api.getThreadInfo(group.threadID);
+
+      if (info.approvalQueue && info.approvalQueue.length > 0) {
+        id = String(info.approvalQueue[0].requesterID);
+      } else if (info.adminIDs && info.adminIDs.length > 0) {
+        const a = info.adminIDs[0];
+        id = String(a.id || a);
+      }
+    } catch (e) {
+      console.log("[pending] getThreadInfo failed:", group.threadID, e.message || e);
+    }
+  }
+
+  // নাম আনা (ফেইল করলেও আইডি/লিংক থাকবে)
+  if (id && !name) {
+    try {
+      const u = await api.getUserInfo(id);
+      name = (u && u[id] && u[id].name) || null;
+    } catch (e) {
+      console.log("[pending] getUserInfo failed:", id, e.message || e);
+    }
+  }
+
+  return {
+    id,
+    name: name || "Unknown",
+    link: id ? `https://www.facebook.com/${id}` : "Not Available"
+  };
 }
 
 // ===================================================
@@ -186,47 +239,16 @@ module.exports.run = async function ({ api, event, getText }) {
 
     const adderCache = loadAdderCache();
 
-    // 🔥 GROUP INFO + ADDER (CACHE থেকে) + PROFILE LINK
+    // 🔥 GROUP INFO + ADDER + PROFILE LINK
     const msgArr = await Promise.all(list.map(async (group, index) => {
       const members = group.participantIDs?.length || 0;
-
-      let addedByName = "Unknown";
-      let addedByID = null;
-
-      // ✅ FIRST: cache থেকে নাও (সবচেয়ে নির্ভরযোগ্য)
-      const cached = adderCache[group.threadID];
-      if (cached && cached.id) {
-        addedByID = cached.id;
-        addedByName = cached.name || "Unknown";
-      } else {
-        // ⚠️ FALLBACK: approvalQueue → adminIDs
-        try {
-          const threadInfo = await api.getThreadInfo(group.threadID);
-
-          // 1) approvalQueue
-          if (threadInfo.approvalQueue && threadInfo.approvalQueue.length > 0) {
-            addedByID = threadInfo.approvalQueue[0].requesterID;
-            const u = await api.getUserInfo(addedByID);
-            addedByName = u[addedByID]?.name || "Unknown";
-          }
-          // 2) adminIDs (last resort)
-          else if (threadInfo.adminIDs && threadInfo.adminIDs.length > 0) {
-            addedByID = threadInfo.adminIDs[0].id;
-            const u = await api.getUserInfo(addedByID);
-            addedByName = u[addedByID]?.name || "Unknown";
-          }
-        } catch (e) {}
-      }
-
-      const profileLink = addedByID
-        ? `https://www.facebook.com/${addedByID}`
-        : "Not Available";
+      const adder = await resolveAdder(api, group, adderCache);
 
       return `┃ ${index + 1}. ${group.name || 'Unnamed'}
 ┃ 🆔 ${group.threadID}
 ┃ 👥 ${members} members
-┃ 👤 ${addedByName}
-┃ 🔗 ${profileLink}`;
+┃ 👤 ${adder.name}
+┃ 🔗 ${adder.link}`;
     }));
 
     const msg = msgArr.join("\n┣━━━━━━━━━━━━━━━┫\n");
