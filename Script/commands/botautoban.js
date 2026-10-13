@@ -4,7 +4,7 @@ const path = require("path");
 
 module.exports.config = {
     name: "botautoban",
-    version: "3.6.0",
+    version: "3.7.0",
     hasPermssion: 0,
     credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
     description: "অন্যান্য বট শনাক্ত করে স্বয়ংক্রিয়ভাবে ব্যান করে (অ্যাডমিন সুরক্ষা সহ)",
@@ -150,7 +150,6 @@ const englishKeywords = [
     "𝗞𝗶𝗶 𝗵𝗼𝗶𝗰𝗲 😑😑",
     "𝗸𝗶 𝗵𝗼𝗹𝗼 𝗯𝗯𝘆 𝗹𝗼𝗷𝗷𝗮 𝗽𝗮𝗰𝗰𝗵𝗼 𝗸𝗻🚶",
     "𝗞𝗼 𝗮𝗺𝗿 𝗷𝗼𝗻𝗻𝗼🐤🐤",
-    // ============= নতুন যোগ করা ইংরেজি কীওয়ার্ড =============
     "𝗠𝗲𝘆𝗲𝗱𝗲𝗿 𝗲𝗺𝗼𝗷𝗶 𝘁𝘂𝗺𝗶 𝘂𝘀𝗲 𝗸𝗼𝗿𝗼 𝗸𝗲𝗻𝗼😾",
     "🥴❤️‍🩹",
     "𝗛𝗶 𝗵𝗮 𝗵𝗼 𝗵𝗼 🙂🤗",
@@ -178,14 +177,79 @@ const englishKeywords = [
     "𝗕𝗼𝗹𝗼 𝗯𝗯𝘆😗",
     "𝗢𝗸 𝗷𝗮𝗮𝗻🤷",
     "𝗢𝗸𝗮𝘆🤥😼",
-    // ============= ইমোজি/স্পেশাল ক্যারেক্টার =============
     "😲🧸👀",
     "😲🧸😼",
     "😲🧸😚",
     "😲🧸🥴",
     "😲🧸🐸",
     "😤😤😎",
-    "😤😤🚶"
+    "😤😤🚶",
+    // ================== নতুন যোগ করা কীওয়ার্ড ==================
+    "𝗢𝗼𝗼𝗼𝗵𝗵𝗵𝗵𝗵𝗵𝗵👀",
+    "𝗵𝗺𝗺 𝘁𝗮𝗿 𝗽𝗼𝗿🐐",
+    "𝗣𝗿𝗲𝗴𝗻𝗮𝗻𝘁🥴",
+    "𝗧𝗮𝗼 𝘁𝗵𝗶𝗸 😾😴😴",
+    "𝗢𝗼𝗼𝗼𝗵𝗵𝗵𝗵𝗵𝗵𝗵🐥",
+    "𝗛𝗲𝗮𝗮🙂",
+    "𝗛𝗲𝗮 𝗮𝗺𝗶 𝘁𝗶𝗸 𝗯𝗼𝗹𝗶😆",
+    "𝗨𝗺𝗺😒",
+    "𝗧𝗮𝗼 𝘁𝗵𝗶𝗸 😾🌝",
+    "আন্টি-🙆-আপনার মেয়ে-👰‍♀️-রাতে আমারে ভিদু কল দিতে বলে🫣-🥵🤤💦",
+    "𝗡𝗵𝗵 𝗸𝗵𝗮𝗯𝗼 𝗻𝗵𝗵 𝘁𝘂𝗶 𝗸𝗵𝗮🫶🏻",
+    "𝘁𝗮𝗿𝗽𝗼𝗿 𝗺𝗶𝘀𝘀 𝗞𝗼𝗿𝘁𝗲𝗰𝗶 🙂💔😭👋",
+    "𝗖𝗵𝗶𝗶 𝗼𝘀𝗵𝗹𝗶𝗹🥳",
+    "『 ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ᴛʜᴇ ᴄʟᴀɴ 』",
+    "👋 ʜᴇʟʟᴏ, R Riya, R Riya!",
+    "🏘️ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ: 𝗦𝗔𝗛𝗨 𝗗𝗘𝗩𝗫 𝗕𝗢𝗫",
+    "🕒 ʜᴀᴠᴇ ᴀ ɢᴏᴏᴅ noon",
+    "[ 📝 ɴᴏᴛᴇ: ᴘʟᴇᴀꜱᴇ ʀᴇᴀᴅ ᴛʜᴇ ɢʀᴏᴜᴘ ʀᴜʟᴇꜱ ᴄᴀʀᴇꜰᴜʟʟʏ ]",
+    "MODE » Only admins can use bots",
+    "🌸 Assalamualaikum 🌸",
+    "🌺 Thank you so much for using my bot in your group ❤️‍🩹",
+    "😻 I hope all members enjoy! 🤗",
+    "🔰 To view commands 📌",
+    "𝐁𝐨𝐭 𝐎𝐰𝐧𝐞𝐫 ➢ 🔰𝗬𝗼𝘂𝗿 𝗡𝗮𝗺𝗲🔰",
+    "𝐏𝐑𝐄𝐅𝐈𝐗 𝐈𝐍𝐅𝐎",
+    "🌐 𝐒𝐘𝐒𝐓𝐄𝐌 𝐏𝐑𝐄𝐅𝐈𝐗",
+    "🏠 𝐆𝐑𝐎𝐔𝐏 𝐏𝐑𝐄𝐅𝐈𝐗",
+    "ᴀᴍᴀᴋᴇ ᴄʜᴇʀᴇ ᴅᴀᴏ ᴀᴍɪ ᴀᴍᴍᴜʀ ᴋᴀᴄʜᴇ ᴊᴀʙᴏ...!! 🥹",
+    "🌐 𝗦𝘆𝘀𝘁𝗲𝗺 𝗽𝗿𝗲𝗳𝗶𝘅:   /",
+    "🛸 𝗬𝗼𝘂𝗿 𝗯𝗼𝘅 𝗰𝗵𝗮𝘁 𝗽𝗿𝗲𝗳𝗶𝘅:   /",
+    "হ্যাঁ জানু , এইদিক এ আসো কিস দেই🤭 😘",
+    "BABU TUMI ASHCHO? 🥺👉👈",
+    "✖ 𝗖𝗺𝗱 𝗡𝗼𝘁 𝗙𝗼𝘂𝗻𝗱.",
+    "➤ 𝗗𝗶𝗱 𝘆𝗼𝘂 𝗺𝗲𝗮𝗻 ❝chor❞",
+    "𝗡𝗮 𝘁𝗼𝗿 𝗰𝗼𝗸𝗵𝗲 𝗽𝗯𝗹𝗺😡",
+    "𝗡𝗮 𝘁𝗼𝗿 𝗰𝗼𝗸𝗵𝗲 𝗽𝗯𝗹𝗺😚",
+    "🤬তুই বট এরজন্য ব্যান করে দিলাম",
+    "•Type /ban list",
+    "𝗞𝗲 𝘁𝘂𝗶 🙂🙄🥳",
+    "ʜᴇᴀ xᴀɴɴᴜ ʙᴏʟᴏ ᴀᴍɪ ᴀᴄʜɪ 🥹🎀",
+    "Bolo Babu, তুমি কি আমাকে ভালোবাসো? 🙈",
+    "বালিকা━👸-𝐃𝐨 𝐲𝐨𝐮-🫵-বিয়া-𝐦𝐞-😽-আমি তোমাকে-😻-আম্মু হইতে সাহায্য করব-🙈🥱",
+    "ʜᴇᴀ ᴘᴀᴋʜɪ ʙᴏʟᴏ 🥺😚",
+    "𝗦𝗼𝗿𝗿𝘆 𝗕𝗮𝗯𝘆 𝗮𝗺𝗮𝗸𝗲 𝗮𝘁𝗮 𝗧𝗲𝗮𝗰𝗵 𝗸𝗼𝗿𝗮 𝗵𝗼𝗶 𝗻𝗶 < 🥺",
+    "𝗥𝗮𝘀𝘁𝗮 𝗰𝗶𝗻𝗶 𝗻𝗮😒😒",
+    "𝗥𝗮𝘀𝘁𝗮 𝗰𝗶𝗻𝗶 𝗻𝗮🐥",
+    "𝗔𝗰𝗰𝗵𝗮👋",
+    "𝗢𝗸𝗮𝘆🐤",
+    "𝗧𝗼𝗿 𝗻𝗮𝗻𝗶🫡",
+    "𝗬𝗲𝗮😒",
+    "𝗢𝗸𝗮𝘆🤥🥳🥳",
+    "𝗛𝗮𝗲 𝗴𝗼👋👋",
+    "𝗞𝗶𝘀𝗲𝗿 𝗵𝗲𝗮🥹😵‍💫",
+    "𝗧𝗼𝗿 𝗱𝘂𝗹𝗮𝘃𝗮𝗶🤦",
+    "❌এই কমান্ডটা শুধু আমার বস এর জন্য💩🫵🏻",
+    "✅ User added back automatically!",
+    "🎉 স্বাগতম R Riya! 🫠",
+    "গ্রুপ: 𝗦𝗔𝗛𝗨 𝗗𝗘𝗩𝗫 𝗕𝗢𝗫",
+    "সদস্য সংখ্যা: 114",
+    "যোগ করেছেন: Crown Price",
+    "⏰ 12:42 PM  |  📅 মঙ্গলবার",
+    "𝗞𝗼𝘁𝗵𝗮𝗶😆",
+    "𝗢𝗼🐤",
+    "𝗢𝗼🥳",
+    "𝗛𝘂𝗺😛"
 ];
 
 // ================== বাংলা বট ডিটেক্ট কীওয়ার্ড ==================
@@ -240,10 +304,10 @@ const banglaKeywords = [
     "-𝗢𝗶𝗶 আন্টি-🙆‍♂️-তোমার মেয়ে চোখ মারে-🥺🥴🐸"
 ];
 
-// ================== সব কীওয়ার্ড একত্রে (চেক করার জন্য) ==================
+// ================== সব কীওয়ার্ড একত্রে ==================
 const botKeywords = [...englishKeywords, ...banglaKeywords];
 
-// ================== অ্যাডমিন লিস্ট লোড (config.json চেক) ==================
+// ================== অ্যাডমিন লিস্ট লোড ==================
 function loadAdminList() {
     try {
         const configPath = path.join(__dirname, "..", "..", "config.json");
@@ -263,6 +327,20 @@ function isAdmin(senderID) {
     return adminList.includes(String(senderID)) || adminList.includes(senderID);
 }
 
+// ================== আসল নাম আনা (Facebook User সমস্যার সমাধান) ==================
+async function getRealName(api, Users, senderID) {
+    let name = "";
+    try { name = await Users.getNameUser(senderID); } catch (e) {}
+
+    if (!name || /facebook user/i.test(name)) {
+        try {
+            const info = await api.getUserInfo(senderID);
+            name = info?.[senderID]?.name || "";
+        } catch (e) {}
+    }
+    return name || "Unknown User";
+}
+
 // ================== ইভেন্ট হ্যান্ডলার ==================
 module.exports.handleEvent = async ({ event, api, Users, Threads }) => {
     const { threadID, messageID, body, senderID } = event;
@@ -280,8 +358,13 @@ module.exports.handleEvent = async ({ event, api, Users, Threads }) => {
     }
 
     const msg = body.toLowerCase().trim();
+
+    // কীওয়ার্ড চেক করা (আগে চেক করলে অপ্রয়োজনীয় API কল হয় না)
+    const matchedWords = botKeywords.filter(word => msg === word.toLowerCase() || msg.includes(word.toLowerCase()));
+    if (matchedWords.length === 0) return;
+
     const time = moment().tz("Asia/Dhaka").format("HH:mm:ss DD/MM/YYYY");
-    const userName = await Users.getNameUser(senderID);
+    const userName = await getRealName(api, Users, senderID);
 
     // থ্রেডের নাম পাওয়া
     let threadName = "ব্যক্তিগত চ্যাট";
@@ -290,14 +373,9 @@ module.exports.handleEvent = async ({ event, api, Users, Threads }) => {
         threadName = threadInfo.threadName || threadName;
     } catch (e) {}
 
-    // কীওয়ার্ড চেক করা
-    const matchedWords = botKeywords.filter(word => msg === word.toLowerCase() || msg.includes(word.toLowerCase()));
-
-    if (matchedWords.length === 0) return;
-
-    // ================== ছোট ব্যান নোটিশ (ইউজার মেনশন সহ) ==================
+    // ================== Short Ban Notice (English + Credit) ==================
     const banNotice = {
-        body: `🤖 বট ডিটেক্ট! ব্যান করা হলো 🚫\n${userName}`,
+        body: `🚫 Bot Detected!\n${userName}\n— Credit: MR JUWEL`,
         mentions: [
             {
                 tag: userName,
@@ -306,10 +384,10 @@ module.exports.handleEvent = async ({ event, api, Users, Threads }) => {
         ]
     };
 
-    // ================== ব্যান প্রক্রিয়া ==================
+    // ================== Ban Process ==================
     const userData = await Users.getData(senderID) || {};
     userData.banned = true;
-    userData.reason = `অন্য বট হিসেবে ডিটেক্ট: ${matchedWords.join(', ')}`;
+    userData.reason = `Detected as another bot: ${matchedWords.join(', ')}`;
     userData.dateAdded = time;
     userData.threadID = threadID;
     userData.threadName = threadName;
@@ -323,12 +401,14 @@ module.exports.handleEvent = async ({ event, api, Users, Threads }) => {
 
     await Users.setData(senderID, { data: userData });
 
-    // ================== ছোট নোটিশ পাঠানো (মেনশন সহ, ১ মিনিট পর অটো ডিলিট) ==================
+    // ================== Send Short Notice (Mention + Auto Delete after 2 sec) ==================
     api.sendMessage(banNotice, threadID, (err, info) => {
-        if (err) return;
+        if (err || !info) return;
         setTimeout(() => {
-            api.unsendMessage(info.messageID).catch(() => {});
-        }, 60000);
+            try {
+                api.unsendMessage(info.messageID, () => {});
+            } catch (e) {}
+        }, 2000);
     }, messageID);
 };
 
@@ -337,19 +417,19 @@ module.exports.run = async ({ event, api }) => {
     const adminList = loadAdminList();
     return api.sendMessage(
 `╔══════════════════╗
-║   🤖 বট ডিটেক্ট সিস্টেম   ║
+║   🤖 Bot Detect System   ║
 ╚═══════════════════╝
 
-✅ মনিটরিং: সক্রিয়
-✅ অটো ব্যান: চালু
-✅ অ্যাডমিন সুরক্ষা: সক্রিয় 🛡️
+✅ Monitoring: Active
+✅ Auto Ban: ON
+✅ Admin Protection: ON 🛡️
 
-📊 ইংরেজি কীওয়ার্ড: ${englishKeywords.length}
-📊 বাংলা কীওয়ার্ড: ${banglaKeywords.length}
-📊 মোট কীওয়ার্ড: ${botKeywords.length}
-🛡️ সুরক্ষিত অ্যাডমিন: ${adminList.length} জন
+📊 English Keywords: ${englishKeywords.length}
+📊 Bangla Keywords: ${banglaKeywords.length}
+📊 Total Keywords: ${botKeywords.length}
+🛡️ Protected Admins: ${adminList.length}
 
-⚡ বট নিরাপদে চলছে ⚡`,
+⚡ Credit: MR JUWEL ⚡`,
         event.threadID
     );
 };
