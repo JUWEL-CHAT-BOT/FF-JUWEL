@@ -198,7 +198,7 @@ ${global.config.PREFIX}help
 ${global.config.PREFIX}info
 ${global.config.PREFIX}admin
 
-➤ Messenger: mrjuwel444
+➤ Messenger: m.me/mrjuwel444
 ➤ WhatsApp: +8801943488192
 
 ❖⋆══════════════⋆❖
