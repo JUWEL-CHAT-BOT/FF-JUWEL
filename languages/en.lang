@@ -63,7 +63,7 @@ listen.loadedEnvironmentThread=Loaded thread environment variable successfully
 listen.loadedEnvironmentUser=Loaded user environment variable successfully
 listen.successLoadEnvironment=Loaded environment variable successfully
 listen.failLoadEnvironment=Can't load environment variable, error: %1
-listen.threadBanned=This thread has been banned from using the bot!
+listen.threadBanned=╭───────────────╮\n│ 🚫 𝗕𝗢𝗫 𝗕𝗔𝗡𝗡𝗘𝗗 \n╰───────────────╯
 listen.userBanned=You have been banned from using the bot!
 
 # ==================== includes/controller/currencies.js ====================
@@ -86,15 +86,15 @@ users.notFound=User not found in database!
 users.alreadyExists=User already exists!
 
 # ==================== includes/handle/handleCommand.js ====================
-handleCommand.userBanned=╔══════════════════╗\n║  🚫 𝗬𝗢𝗨 𝗔𝗥𝗘 𝗕𝗔𝗡𝗡𝗘𝗗 🚫    ║\n╚══════════════════╝\n\n┏━━━━━━━━━━━━━━━━━━━━┓\n┃ বক্স এ বেশি আবলামি করার কারণে \n┃ তুমাকে ব্যান করা হয়েছে..!🚫   \n┃                                \n┃ আন ব্যান হতে চাইলে জুয়েল বসকে \n┃ নক করো আন ব্যান করতে বলো      \n┃ বস এর আইডি                     \n┃                                \n┃ > fb.com/mrjuwel               \n┗━━━━━━━━━━━━━━━━━━━━┛
-handleCommand.threadBanned=╔═══════════════════════╗\n║  🚫 𝗚𝗥𝗢𝗨𝗣 𝗕𝗔𝗡𝗡𝗘𝗗 🚫    ║\n╚═══════════════════════╝\n\n╭━━━━━━━━━━━━━━━━━━━━╮\n┃ বক্স এ বেশি আবলামি করার কারণে\n┃ গুপ ব্যান করা হয়েছে.গুপ.!🚫\n┃\n┃ আন ব্যান করতে চাইলে জুয়েল বসকে\n┃ নক করো আন ব্যান করতে বলো\n┃ বস এর আইডি\n┃\n┃ > fb.com/mrjuwel\n╰━━━━━━━━━━━━━━━━━━━━╯
-handleCommand.commandNotExist=╭━━━━━━━━━━━━━━━⭓\n┃  ⚠️ 𝗪𝗥𝗢𝗡𝗚 𝗖𝗢𝗠𝗠𝗔𝗡𝗗 ⚠️\n╰━━━━━━━━━━━━━━━⭓\n\n┏━━━━━━━━━━━━━━━━━━┓\n┃ 🗣️ The command you gave is wrong 🤦‍♂️\n┃ ⚠️ This command is not in my system\n┗━━━━━━━━━━━━━━━━━━┛\n\n✅ Please give a correct command, baby ♻️🎀\n\n╭━━━━━━━━━━━━━━━⭓\n┃  💙 𝗧𝗥𝗬 𝗔𝗚𝗔𝗜𝗡 💙\n╰━━━━━━━━━━━━━━━⭓
-handleCommand.commandThreadBanned=╭━━━━━━━━━━━━━━━⭓\n┃  ✅ 𝗖𝗢𝗥𝗥𝗘𝗖𝗧 𝗖𝗢𝗠𝗠𝗔𝗡𝗗 ✅\n╰━━━━━━━━━━━━━━━⭓\n\n┏━━━━━━━━━━━━━━━━━━┓\n┃ 😘 Please use the correct command, baby 🫂\n┃ 📌 Command: "%1"\n┗━━━━━━━━━━━━━━━━━━┛\n\n💙 𝗧𝗛𝗔𝗡𝗞 𝗬𝗢𝗨 💙
+handleCommand.userBanned=╭─────────────╮\n│ 🚫𝗬𝗢𝗨  𝗕𝗔𝗡𝗡𝗘𝗗 \n╰─────────────╯
+handleCommand.threadBanned=╭────────────────╮\n  🚫 𝗚𝗥𝗢𝗨𝗣 𝗕𝗔𝗡𝗡𝗘𝗗 \n╰────────────────╯
+handleCommand.commandNotExist=╭──────────────╮\n│ ⚠️ 𝗪𝗥𝗢𝗡𝗚 𝗖𝗠𝗗 \n╰──────────────╯\nএই কমান্ড আমার সিস্টেমে নেই 🤦‍♂️\n✅ সঠিক কমান্ড দাও, বেবি 🎀
+handleCommand.commandThreadBanned=╭───────────────╮\n│ ✅ 𝗖𝗢𝗥𝗥𝗘𝗖𝗧 𝗖𝗠𝗗 \n╰───────────────╯\n✅ সঠিক কমান্ড: "%1"
 handleCommand.commandUserBanned=You are unable to use command "%1"
 handleCommand.threadNotAllowNSFW=This Commnd Only use Andmin
 handleCommand.cantGetInfoThread=Can't get your thread's info, error: %1
 handleCommand.cantGetUserInfo=Can't get user's info, error: %1
-handleCommand.permssionNotEnough=╔═════════════════╗\n║     🚫𝗔𝗖𝗖𝗘𝗦𝗦 𝗗𝗘𝗡𝗜𝗘𝗗🚫     ║\n╚═════════════════╝\n\n┏━━━━━━━━━━━━━━━━━━┓\n┃ %1 You Have No Permission! 🚫\n┃ This Command is Only For Boss\n┃ 乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐ 😘\n┃\n┃ !🥵এই কমান্ডটা তোর⚠জন্য না'রে পাগলা!\n┃ 👑 এই কমান্ড শুধুমাত্র আমার বস\n┃ 乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐\n┃ ব্যবহার করতে পারবে✅\n┃ তুই তো এডমিন লেভেলে নাই বুঝলি?🐸👋😂\n┗━━━━━━━━━━━━━━━━━━━━┛
+handleCommand.permssionNotEnough=╭──────────────╮\n  🚫 𝗔𝗖𝗖𝗘𝗦𝗦 𝗗𝗘𝗡𝗜𝗘𝗗 \n╰──────────────╯\n👤 %1, এটা কমান্ড শুধু আমার বস  🐸\n👑 乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐ ব্যাবহার করতে পারবে🎀🙌
 handleCommand.cantSetMessageReaction=Having some unexpected error at setMessageReaction, error: %1
 handleCommand.executeCommand=[ %1 ] Command used: %2 by user: %3 at thread: %4 | Args included: %5 | Processing time: %6ms
 handleCommand.commandError=Having some unexpected error when using command %1, error: %2
@@ -135,7 +135,7 @@ handleSchedule.timeInvalid=Invalid schedule time provided!
 handleSchedule.alreadyExists=Schedule already exists for module %1
 
 # ==================== utils/index.js ====================
-utils.throwError=ℹ️ [!] ɪғ ᴛʜɪs ᴄᴏᴍᴍᴀɴᴅ ɪs ɴᴏᴛ ᴡᴏʀᴋɪɴɢ, ᴘʟᴇᴀsᴇ ᴜsᴇ ᴀɴᴏᴛʜᴇʀ ᴄᴏᴍᴍᴀɴᴅ ғᴏʀ ᴀɴʏ ᴘʀᴏʙʟᴇᴍ. %1help %2 ᴜsᴇ ғᴏʀ ᴍᴏʀᴇ ᴜsᴀɢᴇ💙🥺
+utils.throwError=⚠️ কমান্ড কাজ না করলে অন্য কমান্ড ট্রাই করো\n💙 %1help %2 দিয়ে বিস্তারিত দেখো
 utils.invalidCommand=Invalid command provided!
 utils.missingParameter=Missing required parameter: %1
 utils.parseError=Failed to parse data, error: %1
