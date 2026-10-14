@@ -1,6 +1,6 @@
 module.exports.config = {
 	name: "kick",
-	version: "1.5.0",
+	version: "1.6.0",
 	hasPermssion: 1,
 	credits: "MR JUWEL",
 	description: "Ultra fast multi kick system",
@@ -11,6 +11,22 @@ module.exports.config = {
 
 module.exports.run = async function ({ api, event }) {
 	try {
+		const threadID = event.threadID;
+		const botID = api.getCurrentUserID();
+
+		// গ্রুপের তথ্য আনা
+		const info = await api.getThreadInfo(threadID);
+		const adminIDs = (info.adminIDs || []).map(a => String(a.id || a));
+
+		// বট এডমিন কিনা চেক
+		if (!adminIDs.includes(String(botID))) {
+			return api.sendMessage(
+				"❌ আমি এই গ্রুপের এডমিন না!\nআগে আমাকে এডমিন বানান, তারপর কিক করতে পারবো।",
+				threadID,
+				event.messageID
+			);
+		}
+
 		let targetIDs = [];
 
 		if (event.type === "message_reply") {
@@ -21,43 +37,54 @@ module.exports.run = async function ({ api, event }) {
 			targetIDs = targetIDs.concat(Object.keys(event.mentions));
 		}
 
-		targetIDs = [...new Set(targetIDs)];
+		targetIDs = [...new Set(targetIDs.map(String))];
 
 		if (targetIDs.length === 0)
-			return api.sendMessage("⚠️ Reply or tag someone!", event.threadID, event.messageID);
+			return api.sendMessage("⚠️ Reply or tag someone!", threadID, event.messageID);
 
-		const total = targetIDs.length;
+		// বট নিজেকে বা অন্য এডমিনকে কিক করা আটকানো
+		const skipped = [];
+		const validIDs = targetIDs.filter(id => {
+			if (id === String(botID) || adminIDs.includes(id)) {
+				skipped.push(id);
+				return false;
+			}
+			return true;
+		});
 
-		// instant UI
-		const msg = await api.sendMessage(
-			`⚡ KICK STARTED\n👥 Total: ${total}\n🚀 Fast mode ON`,
-			event.threadID
+		if (validIDs.length === 0)
+			return api.sendMessage("⚠️ এডমিন বা বটকে কিক করা যাবে না!", threadID, event.messageID);
+
+		await api.sendMessage(
+			`⚡ KICK STARTED\n👥 Total: ${validIDs.length}\n🚀 Fast mode ON`,
+			threadID
 		);
 
 		let kicked = 0;
 		let failed = 0;
 
-		// ⚡ FAST PARALLEL KICK (no delay)
+		// কলব্যাক দিয়ে আসল রেজাল্ট ধরা
 		await Promise.all(
-			targetIDs.map(async (id) => {
-				try {
-					await api.removeUserFromGroup(id, event.threadID);
-					kicked++;
-				} catch (e) {
-					failed++;
-				}
-			})
+			validIDs.map(id =>
+				new Promise(resolve => {
+					api.removeUserFromGroup(id, threadID, (err) => {
+						if (err) failed++;
+						else kicked++;
+						resolve();
+					});
+				})
+			)
 		);
 
-		// final result
 		return api.sendMessage(
 			`╭──── FAST RESULT ────╮\n` +
-			`│ 👥 Total: ${total}\n` +
+			`│ 👥 Total: ${validIDs.length}\n` +
 			`│ ✅ Kicked: ${kicked}\n` +
 			`│ ❌ Failed: ${failed}\n` +
+			`│ ⏭️ Skipped (admin): ${skipped.length}\n` +
 			`│ ⚡ Mode: Ultra Fast\n` +
 			`╰────────────────────╯`,
-			event.threadID
+			threadID
 		);
 
 	} catch (err) {
