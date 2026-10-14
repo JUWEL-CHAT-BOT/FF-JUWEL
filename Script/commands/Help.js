@@ -3,7 +3,7 @@ const axios = require("axios");
 
 module.exports.config = {
   name: "help",
-  version: "5.0.0",
+  version: "6.1.0",
   hasPermssion: 0,
   credits: "乛 MR ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "All commands in one serial list + command info",
@@ -12,31 +12,23 @@ module.exports.config = {
   cooldowns: 5
 };
 
-// ── 𝐁𝐨𝐥𝐝 𝐒𝐞𝐫𝐢𝐟 𝐅𝐨𝐧𝐭 ──
-function toBold(text) {
-  const map = {
-    'A':'𝐀','B':'𝐁','C':'𝐂','D':'𝐃','E':'𝐄','F':'𝐅','G':'𝐆','H':'𝐇','I':'𝐈','J':'𝐉',
-    'K':'𝐊','L':'𝐋','M':'𝐌','N':'𝐍','O':'𝐎','P':'𝐏','Q':'𝐐','R':'𝐑','S':'𝐒','T':'𝐓',
-    'U':'𝐔','V':'𝐕','W':'𝐖','X':'𝐗','Y':'𝐘','Z':'𝐙',
-    'a':'𝐚','b':'𝐛','c':'𝐜','d':'𝐝','e':'𝐞','f':'𝐟','g':'𝐠','h':'𝐡','i':'𝐢','j':'𝐣',
-    'k':'𝐤','l':'𝐥','m':'𝐦','n':'𝐧','o':'𝐨','p':'𝐩','q':'𝐪','r':'𝐫','s':'𝐬','t':'𝐭',
-    'u':'𝐮','v':'𝐯','w':'𝐰','x':'𝐱','y':'𝐲','z':'𝐳'
-  };
-  return String(text).split('').map(c => map[c] || c).join('');
+// ── 𝙼𝚘𝚗𝚘 𝙵𝚘𝚗𝚝 (𝙰𝙱𝙲𝙳 / 𝚊𝚋𝚌𝚍 / 𝟶𝟷𝟸𝟹) ──
+function toMono(text) {
+  return Array.from(String(text)).map(c => {
+    const code = c.codePointAt(0);
+    if (code >= 65 && code <= 90)  return String.fromCodePoint(0x1D670 + code - 65); // A-Z
+    if (code >= 97 && code <= 122) return String.fromCodePoint(0x1D68A + code - 97); // a-z
+    if (code >= 48 && code <= 57)  return String.fromCodePoint(0x1D7F6 + code - 48); // 0-9
+    return c;
+  }).join("");
 }
 
-// ── 𝐁𝐨𝐥𝐝 𝐍𝐮𝐦𝐛𝐞𝐫 ──
-function toBoldNumber(num) {
-  const b = {'0':'𝟎','1':'𝟏','2':'𝟐','3':'𝟑','4':'𝟒','5':'𝟓','6':'𝟔','7':'𝟕','8':'𝟖','9':'𝟗'};
-  return num.toString().split('').map(d => b[d] || d).join('');
-}
-
-// ── ⏳ সেটিংস: ৫ মিনিট (মিলিসেকেন্ডে) ──
+// ── ⚙ সেটিংস ──
 const USER_COOLDOWN = 5 * 60 * 1000;   // একই ইউজার ৫ মিনিটের আগে আবার help দিতে পারবে না
 const AUTO_DELETE   = 5 * 60 * 1000;   // ৫ মিনিট পর মেসেজ অটো ডিলিট
-const userCooldowns = new Map();       // senderID => শেষবার help দেওয়ার সময়
+const userCooldowns = new Map();
 
-// ── 🗑️ ৫ মিনিট পর মেসেজ ডিলিট করার ফাংশন ──
+// ── 🗑️ অটো ডিলিট ──
 function scheduleDelete(api, info) {
   if (!info || !info.messageID) return;
   setTimeout(() => {
@@ -44,24 +36,26 @@ function scheduleDelete(api, info) {
   }, AUTO_DELETE);
 }
 
-// ── মেসেজ পাঠিয়ে ৫ মিনিট পর অটো ডিলিট ──
 function sendAutoDelete(api, msg, threadID, replyID) {
   return api.sendMessage(msg, threadID, (err, info) => {
     if (!err) scheduleDelete(api, info);
   }, replyID);
 }
 
-// ── Prefix নেওয়ার ফাংশন ──
-function getPrefix() {
-  let prefix = global.config?.PREFIX || "!";
+// ── config.json পড়া ──
+function readConfig() {
   try {
     const configPath = __dirname + "/../../config.json";
     if (fs.existsSync(configPath)) {
-      const cfgJson = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-      if (cfgJson.PREFIX) prefix = cfgJson.PREFIX;
+      return JSON.parse(fs.readFileSync(configPath, "utf-8"));
     }
   } catch (e) {}
-  return prefix;
+  return {};
+}
+
+function getPrefix() {
+  const cfgJson = readConfig();
+  return cfgJson.PREFIX || global.config?.PREFIX || "!";
 }
 
 // ── 📋 নির্দিষ্ট কমান্ডের তথ্য ──
@@ -73,46 +67,42 @@ async function sendCommandInfo(api, event, commandName) {
   const cmd = commands.get(commandName.toLowerCase());
   if (!cmd) {
     return sendAutoDelete(api,
-      `╔══════════════════════╗\n║  ❌ 𝐍𝐎𝐓 𝐅𝐎𝐔𝐍𝐃 ❌  ║\n╚══════════════════════╝\n\n` +
-      `「 ${toBold(commandName)} 」 নামে কোনো কমান্ড নেই!\n\n` +
-      `📌 সব কমান্ড দেখতে লিখুন: ${prefix}help`,
+      `╔════════════════╗\n║  ❌ ${toMono("NOT FOUND")} ❌  ║\n╚════════════════╝\n\n` +
+      `「 ${toMono(commandName)} 」 নামে কোনো কমান্ড নেই!\n\n` +
+      `📌 ${toMono("All commands")}: ${toMono(prefix + "help")}`,
       threadID, messageID
     );
   }
 
   const cfg = cmd.config || {};
+  const cfgJson = readConfig();
+  const botName = cfgJson.BOTNAME || "⎯꯭𓆩꯭𝆺𝅥😻⃞𝐑⃞𝐈⃞𝐘⃞𝐀⃞༢࿐";
+  const ownerName = cfgJson.OWNER_NAME || "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐";
 
-  let botName = "⎯꯭𓆩꯭𝆺𝅥😻⃞𝐑⃞𝐈⃞𝐘⃞𝐀⃞༢࿐";
-  let ownerName = "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐";
-  try {
-    const configPath = __dirname + "/../../config.json";
-    if (fs.existsSync(configPath)) {
-      const cfgJson = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-      if (cfgJson.BOTNAME) botName = cfgJson.BOTNAME;
-      if (cfgJson.OWNER_NAME) ownerName = cfgJson.OWNER_NAME;
-    }
-  } catch (e) {}
+  const permMap = {
+    0: "👤 " + toMono("All User"),
+    1: "🛡️ " + toMono("Group Admin"),
+    2: "👑 " + toMono("Bot Admin"),
+    3: "🔱 " + toMono("Owner")
+  };
+  const perm = permMap[cfg.hasPermssion] || permMap[0];
 
-  const permMap = { 0: "👤 𝐀𝐥𝐥 𝐔𝐬𝐞𝐫", 1: "🛡️ 𝐆𝐫𝐨𝐮𝐩 𝐀𝐝𝐦𝐢𝐧", 2: "👑 𝐁𝐨𝐭 𝐀𝐝𝐦𝐢𝐧", 3: "🔱 𝐎𝐰𝐧𝐞𝐫" };
-  const perm = permMap[cfg.hasPermssion] || "👤 𝐀𝐥𝐥 𝐔𝐬𝐞𝐫";
-
-  const infoText = `╔══════════════════════╗
-║   ✨ 𝐂𝐎𝐌𝐌𝐀𝐍𝐃 𝐈𝐍𝐅𝐎 ✨   ║
-╠══════════════════════╣
-║
-║ 🔖 𝐍𝐚𝐦𝐞 ⇢ ${toBold(cfg.name || commandName)}
-║ 📄 𝐔𝐬𝐚𝐠𝐞 ⇢ ${toBold(cfg.usages || "No usage")}
-║ 📜 𝐃𝐞𝐬𝐜 ⇢ ${toBold(cfg.description || "No description")}
-║ 🔑 𝐏𝐞𝐫𝐦 ⇢ ${perm}
-║ 👨‍💻 𝐂𝐫𝐞𝐝𝐢𝐭 ⇢ ${cfg.credits || "Unknown"}
-║ 📂 𝐂𝐚𝐭𝐞𝐠𝐨𝐫𝐲 ⇢ ${toBold(cfg.commandCategory || "system")}
-║ ⏳ 𝐂𝐨𝐨𝐥𝐝𝐨𝐰𝐧 ⇢ ${toBoldNumber(cfg.cooldowns || 0)}s
-║
-╠══════════════════════╣
-║ ⚙ 𝐏𝐫𝐞𝐟𝐢𝐱 ⇢ ${prefix}
-║ 🤖 𝐁𝐨𝐭 ⇢ ${botName}
-║ 👑 𝐎𝐰𝐧𝐞𝐫 ⇢ ${ownerName}
-╚══════════════════════╝`;
+  const infoText =
+`╔════════════════╗
+║  ✨ ${toMono("COMMAND INFO")} ✨
+╠════════════════╣
+║ 🔖 ${toMono("Name")} ⇢ ${toMono(cfg.name || commandName)}
+║ 📄 ${toMono("Usage")} ⇢ ${toMono(cfg.usages || "No usage")}
+║ 📜 ${toMono("Desc")} ⇢ ${toMono(cfg.description || "No description")}
+║ 🔑 ${toMono("Perm")} ⇢ ${perm}
+║ 👨‍💻 ${toMono("Credit")} ⇢ ${cfg.credits || "Unknown"}
+║ 📂 ${toMono("Category")} ⇢ ${toMono(cfg.commandCategory || "system")}
+║ ⏳ ${toMono("Cooldown")} ⇢ ${toMono(cfg.cooldowns || 0)}s
+╠════════════════╣
+║ ⚙ ${toMono("Prefix")} ⇢ ${toMono(prefix)}
+║ 🤖 ${toMono("Bot")} ⇢ ${botName}
+║ 👑 ${toMono("Owner")} ⇢ ${ownerName}
+╚════════════════╝`;
 
   return sendAutoDelete(api, infoText, threadID, messageID);
 }
@@ -127,29 +117,26 @@ async function sendHelp(api, event, args) {
   const { threadID, messageID } = event;
   const prefix = getPrefix();
 
-  // সব কমান্ড এক লিস্টে (A-Z), এক সিরিয়ালে
+  // সব কমান্ড A-Z সিরিয়ালে
   const allCmds = [...new Set(
     [...commands.keys()].map(n => (n || "").trim()).filter(Boolean)
   )].sort((a, b) => a.localeCompare(b));
 
-  let commandList = "";
-  allCmds.forEach((cmd, i) => {
-    commandList += `│ ${toBoldNumber(i + 1)} ཐི༏ཋྀ ${toBold(cmd)}\n`;
-  });
+  // ── এক সিরিয়ালে লিস্ট: প্রতি লাইনে একটা কমান্ড, কোনো ফাঁক নেই ──
+  const pad = String(allCmds.length).length;
+  const commandList = allCmds.map((cmd, i) =>
+    `【${toMono(String(i + 1).padStart(pad, "0"))}】 ➜ ${toMono(cmd)}`
+  ).join("\n");
 
-  const finalText = `
-╔══════════════════════╗
-║    ✿ 𝐂𝐎𝐌𝐌𝐀𝐍𝐃 𝐋𝐈𝐒𝐓 ✿
-╚══════════════════════╝
-
-╭──────────────────────╮
-${commandList}╰──────────────────────╯
-
-╔══════════════════════╗
-║  ✦ 𝐓𝐨𝐭𝐚𝐥: ${toBoldNumber(allCmds.length)} 𝐂𝐨𝐦𝐦𝐚𝐧𝐝𝐬 ✦
-║  📌 𝐈𝐧𝐟𝐨: ${prefix}help <cmd>
-╚══════════════════════╝
-`;
+  const finalText =
+`┏━━━━━━━━━━━━━━━━┓
+   ✿ ${toMono("COMMAND LIST")} ✿
+┗━━━━━━━━━━━━━━━━┛
+${commandList}
+┏━━━━━━━━━━━━━━━━┓
+  ✦ ${toMono("Total")}: ${toMono(allCmds.length)} ${toMono("Commands")} ✦
+  📌 ${toMono("Info")}: ${toMono(prefix)}${toMono("help")} ${toMono("<cmd>")}
+┗━━━━━━━━━━━━━━━━┛`;
 
   const cacheDir = __dirname + "/cache";
   const imgPath = cacheDir + "/helpallbg.jpg";
@@ -190,7 +177,7 @@ ${commandList}╰─────────────────────
   }
 }
 
-// ── শুধু prefix দিয়ে চলবে (noprefix বন্ধ) ──
+// ── শুধু prefix দিয়ে চলবে ──
 module.exports.run = async function ({ api, event, args }) {
   const { threadID, messageID, senderID } = event;
   const now = Date.now();
@@ -202,7 +189,7 @@ module.exports.run = async function ({ api, event, args }) {
     const sec = remain % 60;
     return sendAutoDelete(
       api,
-      `⏳ ${toBold("Cooldown")}!\n\n` +
+      `⏳ ${toMono("Cooldown")}!\n\n` +
       `আপনি এইমাত্র help কমান্ড ব্যবহার করেছেন।\n` +
       `আবার ব্যবহার করতে অপেক্ষা করুন: ${min} মিনিট ${sec} সেকেন্ড`,
       threadID, messageID
