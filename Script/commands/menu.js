@@ -120,8 +120,84 @@ function isBanned(threadID, threadData) {
   return !!(threadData && threadData.banned);
 }
 
+// ================= TIMER TRACKER =================
+// commands ফোল্ডারের কোনো ফাইল যে setInterval / setTimeout বানায় সেগুলো ট্র্যাক করে রাখে,
+// যাতে Soft restart (৭ নম্বর) দিলে caption-এর মতো লুপ কমান্ড পুরোপুরি বন্ধ হয়ে যায়।
+// বটের নিজের timer (fca, mqtt ইত্যাদি) ট্র্যাক হয় না, তাই সেগুলো নিরাপদ।
+if (!global.__cmdTimerTracker) {
+  const tracker = {
+    timers: new Set(),
+    setInterval: global.setInterval,
+    setTimeout: global.setTimeout,
+    clearInterval: global.clearInterval,
+    clearTimeout: global.clearTimeout
+  };
+  global.__cmdTimerTracker = tracker;
+
+  // কলের stack-এ commands ফোল্ডারের (menu ছাড়া) কোনো ফাইল থাকলে সেটা কমান্ডের timer
+  const isCommandOwned = () => {
+    const old = Error.stackTraceLimit;
+    Error.stackTraceLimit = 40;
+    const stack = new Error().stack || "";
+    Error.stackTraceLimit = old;
+    return stack
+      .split("\n")
+      .some((l) => l.includes(COMMANDS_DIR) && !l.includes(__filename));
+  };
+
+  global.setInterval = function (fn, ms, ...args) {
+    const t = tracker.setInterval.call(this, fn, ms, ...args);
+    if (isCommandOwned()) tracker.timers.add(t);
+    return t;
+  };
+
+  global.setTimeout = function (fn, ms, ...args) {
+    if (typeof fn === "function" && isCommandOwned()) {
+      let t;
+      const wrapped = function (...a) {
+        tracker.timers.delete(t);
+        return fn.apply(this, a);
+      };
+      t = tracker.setTimeout.call(this, wrapped, ms, ...args);
+      tracker.timers.add(t);
+      return t;
+    }
+    return tracker.setTimeout.call(this, fn, ms, ...args);
+  };
+
+  global.clearInterval = function (t) {
+    tracker.timers.delete(t);
+    return tracker.clearInterval.call(this, t);
+  };
+
+  global.clearTimeout = function (t) {
+    tracker.timers.delete(t);
+    return tracker.clearTimeout.call(this, t);
+  };
+}
+
+// সব চলমান কমান্ড timer বন্ধ করে, কয়টা বন্ধ হলো সেই সংখ্যা ফেরত দেয়
+function stopCommandTimers() {
+  // while-loop ধরনের কমান্ডের জন্য টোকেন (কমান্ডে global.__restartToken চেক করলে লুপ থামবে)
+  global.__restartToken = (global.__restartToken || 0) + 1;
+
+  const tracker = global.__cmdTimerTracker;
+  if (!tracker) return 0;
+
+  let n = 0;
+  for (const t of Array.from(tracker.timers)) {
+    try {
+      tracker.clearInterval.call(global, t);
+      tracker.clearTimeout.call(global, t);
+      n++;
+    } catch (_) {}
+  }
+  tracker.timers.clear();
+  return n;
+}
+
 // ================= SOFT RESTART (HOT RELOAD) =================
-// Bot process বন্ধ হয় না, uptime ঠিক থাকে। শুধু কমান্ড ফাইলগুলো নতুন করে লোড হয়।
+// Bot process বন্ধ হয় না, uptime ঠিক থাকে। চলমান কমান্ড বন্ধ হয়ে সব কমান্ড ফাইল নতুন করে লোড হয়।
 async function softReload(ctx) {
   const result = { loaded: 0, failed: [], removed: 0 };
   const self = path.basename(__filename);
@@ -315,7 +391,7 @@ function groupPageText(groups, page) {
 // ================= CONFIG =================
 module.exports.config = {
   name: "menu",
-  version: "4.2.0",
+  version: "4.3.0",
   hasPermssion: 2,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "Pro control panel",
@@ -355,7 +431,7 @@ module.exports.run = async function ({ api, event, Threads }) {
     `❹ 🔴 ${mono("Turn OFF in this chat")}`,
     `❺ 🟢 ${mono("Turn ON in this chat")}`,
     `❻ ♻️ ${mono("Full restart")}`,
-    `❼ 🔄 ${mono("Soft restart (reload commands)")}`,
+    `❼ 🔄 ${mono("Soft restart (stop all + reload)")}`,
     `❽ 🔁 ${mono("Reload one command")}`,
     `❾ 🎛️ ${mono("Command ON/OFF")}`,
     `❿ 👥 ${mono("Group list ON/OFF")}`,
@@ -485,13 +561,16 @@ module.exports.handleReply = async function ({ api, event, handleReply, Threads,
 
       // 🔄 SOFT RESTART (bot stays online, uptime kept)
       case "7": {
-        await reply(`🔄 ${mono("Reloading commands...")}`);
+        await reply(`🔄 ${mono("Stopping running commands & reloading...")}`);
 
         try {
+          // আগে সব চলমান কমান্ড (caption loop ইত্যাদি) বন্ধ
+          const stopped = stopCommandTimers();
+
           const res = await softReload({ api, models, Users, Threads, Currencies });
 
           logAction({
-            action: `Soft restart (loaded ${res.loaded}, failed ${res.failed.length})`,
+            action: `Soft restart (stopped ${stopped}, loaded ${res.loaded}, failed ${res.failed.length})`,
             user: event.senderID,
             thread: event.threadID
           });
@@ -499,6 +578,7 @@ module.exports.handleReply = async function ({ api, event, handleReply, Threads,
           const lines = [
             header("🔄", "SOFT RESTART DONE"),
             section("RESULT"),
+            `◈ ${mono("Stopped")} ➜ ${mono(stopped)} ⏹️`,
             `◈ ${mono("Loaded")}  ➜ ${mono(res.loaded)} ✅`,
             `◈ ${mono("Removed")} ➜ ${mono(res.removed)}`,
             `◈ ${mono("Failed")}  ➜ ${mono(res.failed.length)} ${res.failed.length ? "❌" : "✅"}`,
