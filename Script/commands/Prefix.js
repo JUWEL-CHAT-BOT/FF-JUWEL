@@ -1,22 +1,37 @@
 const fs = require("fs-extra");
+const os = require("os");
 const path = require("path");
 
 module.exports.config = {
   name: "prefix",
-  version: "2.0.7",
+  version: "3.1.0",
   hasPermssion: 0,
   credits: "MR JUWEL",
-  description: "Display bot prefix, owner info & stats",
+  description: "Show bot prefix, owner info, system stats & command list",
   commandCategory: "Information",
-  usages: "",
+  usages: "[help]",
   cooldowns: 5
 };
 
-// 🚫 Anti-spam store
+// Put your own links here
+const OWNER_FB_LINK = "https://www.facebook.com/share/1EUpcWUrZ6/";
+const SUPPORT_LINK = "https://m.me/your.support.group";
+
+// Anti-spam store (used by handleEvent only)
 const spamMap = new Map();
 const SPAM_COOLDOWN = 10000; // 10 seconds
 
-// 🔧 Get prefix from config.json
+// Converts A-Z, a-z, 0-9 to the 𝗕𝗼𝗹𝗱 sans-serif font
+function f(str) {
+  return String(str).replace(/[A-Za-z0-9]/g, (ch) => {
+    const c = ch.charCodeAt(0);
+    if (c >= 65 && c <= 90) return String.fromCodePoint(0x1d5d4 + (c - 65));
+    if (c >= 97 && c <= 122) return String.fromCodePoint(0x1d5ee + (c - 97));
+    return String.fromCodePoint(0x1d7ec + (c - 48));
+  });
+}
+
+// Get prefix from config.json
 function getConfigPrefix() {
   try {
     const configPath = path.join(__dirname, "..", "..", "config.json");
@@ -32,22 +47,49 @@ function getConfigPrefix() {
   return null;
 }
 
-module.exports.handleEvent = async ({ event, api, Threads }) => {
+function getPrefix(threadID) {
+  const configPrefix = getConfigPrefix();
+  const threadSetting = global.data.threadData.get(parseInt(threadID)) || {};
+  return configPrefix || threadSetting.PREFIX || global.config.PREFIX;
+}
+
+function getUptime() {
+  const sec = process.uptime();
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return `${d}d ${h}h ${m}m`;
+}
+
+function mb(bytes) {
+  return (bytes / 1024 / 1024).toFixed(0);
+}
+
+function getBotInfo() {
+  return {
+    botName: global.config.BOTNAME || "⎯꯭𓆩꯭𝆺𝅥😻⃞𝐑⃞𝐈⃞𝐘⃞𝐀⃞༢࿐",
+    ownerName: global.config.OWNER_NAME || "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐"
+  };
+}
+
+async function getUserName(Users, senderID) {
+  try {
+    return (await Users.getNameUser(senderID)) || "Friend";
+  } catch (e) {
+    return "Friend";
+  }
+}
+
+// ─────────────────────────────────────────────
+// Trigger words (no prefix needed): only tells the prefix
+// ─────────────────────────────────────────────
+module.exports.handleEvent = async ({ event, api }) => {
   const { threadID, messageID, body, senderID } = event;
   if (!body) return;
 
-  // 🚫 Anti-spam check
   const now = Date.now();
-  if (spamMap.has(senderID)) {
-    if (now - spamMap.get(senderID) < SPAM_COOLDOWN) return;
-  }
+  if (spamMap.has(senderID) && now - spamMap.get(senderID) < SPAM_COOLDOWN) return;
 
-  // ⚙️ Prefix info — config.json চেক → thread data → global config
-  const configPrefix = getConfigPrefix();
-  const threadSetting = global.data.threadData.get(parseInt(threadID)) || {};
-  const prefix = configPrefix || threadSetting.PREFIX || global.config.PREFIX;
-
-  // 🌐 Multi-language trigger words
   const triggerWords = [
     "prefix", "mprefix", "mpre", "bot prefix", "what is the prefix", "bot name",
     "how to use bot", "bot not working", "bot is offline", "prefx", "prfix",
@@ -60,89 +102,113 @@ module.exports.handleEvent = async ({ event, api, Threads }) => {
     "dấu lệnh", "daulenh", "tiền tố"
   ];
 
-  const lowerBody = body.toLowerCase().trim();
-  if (!triggerWords.includes(lowerBody)) return;
-
+  if (!triggerWords.includes(body.toLowerCase().trim())) return;
   spamMap.set(senderID, now);
 
-  // 💖 Random reaction
   const reactions = ["💖", "✨", "🌸", "💫", "❤️", "🦋", "🌟"];
   api.setMessageReaction(
     reactions[Math.floor(Math.random() * reactions.length)],
     messageID, () => {}, true
   );
 
-  // ⚠️ Prefix blank check
+  const prefix = getPrefix(threadID);
   if (!prefix || String(prefix).trim() === "") {
-    return api.sendMessage("⚠️ Prefix have not to be blank", threadID, messageID);
+    return api.sendMessage(f("Prefix cannot be blank"), threadID, messageID);
   }
-
-  // 📊 Uptime & Stats
-  const uptimeSec = process.uptime();
-  const days  = Math.floor(uptimeSec / 86400);
-  const hours = Math.floor((uptimeSec % 86400) / 3600);
-  const mins  = Math.floor((uptimeSec % 3600) / 60);
-  const uptimeStr = `${days}d ${hours}h ${mins}m`;
-
-  const totalUsers   = global.data.allUserID?.length   || 0;
-  const totalThreads = global.data.allThreadID?.length || 0;
-
-  // 🎯 Pull from config
-  const botName   = global.config.BOTNAME     || "⎯꯭𓆩꯭𝆺𝅥😻⃞𝐑⃞𝐈⃞𝐘⃞𝐀⃞༢࿐";
-  const ownerName = global.config.OWNER_NAME  || "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐";
 
   return api.sendMessage(
 `╭─────────────⭓
-│  ✨ 𝐏𝐑𝐄𝐅𝐈𝐗 ✨
+│  ✨ ${f("PREFIX")} ✨
 │  ➤ 『 ${prefix} 』
 ├─────────────⭓
-│  🤖 ${botName}
-│  👑 ${ownerName}
-│  ⏱️ ${uptimeStr}
-│  👥 ${totalUsers}  |  💬 ${totalThreads}
+│  📌 ${f("For full info, type:")}
+│  ${prefix}prefix
 ╰─────────────⭓`,
     threadID,
-    null
+    messageID
   );
 };
 
-// ✅ Required function
-module.exports.run = async ({ event, api, Threads }) => {
-  const { threadID, messageID } = event;
+// ─────────────────────────────────────────────
+// Run with prefix: {prefix}prefix  or  {prefix}prefix help
+// ─────────────────────────────────────────────
+module.exports.run = async ({ event, api, args, Users }) => {
+  const { threadID, messageID, senderID } = event;
 
-  // ⚙️ config.json চেক
-  const configPrefix = getConfigPrefix();
-  const threadSetting = global.data.threadData.get(parseInt(threadID)) || {};
-  const prefix = configPrefix || threadSetting.PREFIX || global.config.PREFIX;
-
-  // ⚠️ Prefix blank check
+  const prefix = getPrefix(threadID);
   if (!prefix || String(prefix).trim() === "") {
-    return api.sendMessage("⚠️ Prefix have not to be blank", threadID, messageID);
+    return api.sendMessage(f("Prefix cannot be blank"), threadID, messageID);
   }
 
-  const uptimeSec = process.uptime();
-  const days  = Math.floor(uptimeSec / 86400);
-  const hours = Math.floor((uptimeSec % 86400) / 3600);
-  const mins  = Math.floor((uptimeSec % 3600) / 60);
-  const uptimeStr = `${days}d ${hours}h ${mins}m`;
-
-  const totalUsers   = global.data.allUserID?.length   || 0;
-  const totalThreads = global.data.allThreadID?.length || 0;
-
-  const botName   = global.config.BOTNAME     || "⎯꯭𓆩꯭𝆺𝅥😻⃞𝐑⃞𝐈⃞𝐘⃞𝐀⃞༢࿐";
-  const ownerName = global.config.OWNER_NAME  || "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐";
-
-  return api.sendMessage(
+  // Command list
+  if (args[0] && args[0].toLowerCase() === "help") {
+    const cmds = global.client && global.client.commands
+      ? Array.from(global.client.commands.keys()).sort()
+      : [];
+    const list = cmds.length
+      ? cmds.map((c) => `• ${prefix}${c}`).join("\n")
+      : f("No commands found");
+    return api.sendMessage(
 `╭─────────────⭓
-│  ✨ 𝐏𝐑𝐄𝐅𝐈𝐗 ✨
+│  📜 ${f("Command List")} (${f(cmds.length)})
+├─────────────⭓
+${list}
+╰─────────────⭓
+💡 ${f("Details:")} ${prefix}help <command>`,
+      threadID,
+      messageID
+    );
+  }
+
+  const userName = await getUserName(Users, senderID);
+  const { botName, ownerName } = getBotInfo();
+
+  const totalUsers = global.data.allUserID?.length || 0;
+  const totalThreads = global.data.allThreadID?.length || 0;
+  const totalCmds = global.client?.commands?.size || 0;
+
+  // RAM / CPU
+  const totalRam = os.totalmem();
+  const usedRam = totalRam - os.freemem();
+  const botRam = process.memoryUsage().rss;
+  const cpus = os.cpus();
+  const cpuModel = cpus.length ? cpus[0].model.trim() : "Unknown";
+  const cpuCores = cpus.length;
+  const load = os.loadavg()[0].toFixed(2);
+
+  // Measure ping
+  const start = Date.now();
+  api.sendMessage(f("Collecting info..."), threadID, (err, info) => {
+    const ping = Date.now() - start;
+    if (!err && info) {
+      try { api.unsendMessage(info.messageID); } catch (e) {}
+    }
+
+    return api.sendMessage(
+`╭─────────────⭓
+│  ✨ ${f("PREFIX")} ✨
 │  ➤ 『 ${prefix} 』
+├─────────────⭓
+│  👋 ${f("Hello,")} ${f(userName)}!
 ├─────────────⭓
 │  🤖 ${botName}
 │  👑 ${ownerName}
-│  ⏱️ ${uptimeStr}
-│  👥 ${totalUsers}  |  💬 ${totalThreads}
+│  ⏱️ ${f(getUptime())}
+│  👥 ${f(totalUsers)}  |  💬 ${f(totalThreads)}
+│  📦 ${f("Total Commands:")} ${f(totalCmds)}
+├─────────────⭓
+│  📡 ${f("Ping:")} ${f(ping + "ms")}
+│  🧠 ${f("RAM:")} ${f(mb(usedRam))}/${f(mb(totalRam))} ${f("MB")}
+│  🤖 ${f("Bot RAM:")} ${f(mb(botRam))} ${f("MB")}
+│  ⚙️ ${f("CPU:")} ${f(cpuModel)}
+│  🔢 ${f("Cores:")} ${f(cpuCores)} | ${f("Load:")} ${f(load)}
+├─────────────⭓
+│  🔗 ${f("Owner:")} ${OWNER_FB_LINK}
+│  💬 ${f("Support:")} ${SUPPORT_LINK}
+│  📜 ${f("Command List:")} ${prefix}prefix help
 ╰─────────────⭓`,
-    threadID,
-    null
-  );
+      threadID,
+      messageID
+    );
+  });
 };
