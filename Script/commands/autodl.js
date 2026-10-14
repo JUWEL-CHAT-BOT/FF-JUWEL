@@ -73,7 +73,21 @@ module.exports = {
 
           if (videoUrl || audioUrl) {
             const title = data.title || data.caption || data.desc || d.title || `${platform} Video`;
-            return { videoUrl, audioUrl, title: cleanTitle(title) };
+            const pick = (...keys) => {
+              for (const o of [data, d]) {
+                for (const k of keys) {
+                  const v = o && o[k];
+                  if (v !== undefined && v !== null && v !== "" && !isNaN(Number(v))) return Number(v);
+                }
+              }
+              return null;
+            };
+            const stats = {
+              likes: pick("like", "likes", "like_count", "digg_count"),
+              comments: pick("comment", "comments", "comment_count"),
+              shares: pick("share", "shares", "share_count")
+            };
+            return { videoUrl, audioUrl, title: cleanTitle(title), stats };
           }
         } catch (err) {
           console.log("[autodl] API failed:", err.message);
@@ -136,17 +150,35 @@ module.exports = {
         }
       }, 5000);
 
-    //━━━━━━━━━━ UI ━━━━━━━━━━//
+    //━━━━━━━━━ UI ━━━━━━━━━//
     const ui = {
-      success: ({ platform, title, user, time, size, audio, index, total }) =>
-        `┏━━━━━ ✦ ${audio ? "🎵 AUDIO" : "🎬 VIDEO"} ✦ ━━━━━┓\n` +
-        `┃ 🌐 ${platform}${total > 1 ? `  ( ${index}/${total} )` : ""}\n` +
-        `┣━━━━━━━━━━━━━━━━━━┫\n` +
-        `┃ 📝 ${title}\n` +
-        `┃ 👤 ${user}\n` +
-        `┃ ⚡ ${time}s   📦 ${size}\n` +
-        `┗━━━━━━━━━━━━━━━━━━┛\n` +
-        `   乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐`,
+      success: ({ platform, title, user, time, size, audio, index, total, stats }) => {
+        const fmt = (n) =>
+          n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : String(n);
+        const has = (v) => v !== undefined && v !== null;
+        const lines = [
+          `┃ 🌐 Platform  ➜  ${platform}${total > 1 ? `  ( ${index}/${total} )` : ""}`,
+          `┃ 🎞️ Type  ➜  ${audio ? "MP3 Audio" : "Video"}`,
+          `┃ 📝 Title  ➜  ${title}`,
+          `┃ 👤 User  ➜  ${user}`
+        ];
+        if (stats) {
+          lines.push(`┣━━━━━━━━━━━━━━━━━┫`);
+          if (has(stats.likes)) lines.push(`┃ ❤️ Likes  ➜  ${fmt(stats.likes)}`);
+          if (has(stats.comments)) lines.push(`┃ 💬 Comments  ➜  ${fmt(stats.comments)}`);
+          if (has(stats.shares)) lines.push(`┃ 🔁 Shares  ➜  ${fmt(stats.shares)}`);
+          if (lines[lines.length - 1].startsWith("┣")) lines.pop();
+        }
+        lines.push(`┣━━━━━━━━━━━━━━━━━┫`);
+        lines.push(`┃ ⚡ Speed  ➜  ${time} sec`);
+        lines.push(`┃ 📦 Size  ➜  ${size}`);
+        return (
+          `┏━━AUTO DOWNLOADER━━┓\n` +
+          lines.join("\n") +
+          `\n┗━━━━━━━━━━━━━━━━┛\n` +
+          `   乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐`
+        );
+      },
       cooldown: (user, m, s) =>
         `┏━━━━━ ⏰ COOLDOWN ⏰ ━━━━━┓\n` +
         `┃ 👤 ${user}\n` +
@@ -278,6 +310,7 @@ module.exports = {
             time,
             size: (size / 1024 / 1024).toFixed(2) + " MB",
             audio: isAudio,
+            stats: info.stats,
             index: i + 1,
             total: links.length
           }),
