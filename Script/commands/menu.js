@@ -17,7 +17,6 @@ function mono(str) {
   });
 }
 
-
 // ================= UI HELPERS =================
 const LINE = "━━━━━━━━━━━━━━━━━━━";
 const THIN = "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄";
@@ -90,17 +89,234 @@ function getUptime() {
   return `${h}h ${m}m`;
 }
 
+// config.json থেকে ADMINBOT লিস্ট পড়া (প্রতিবার ফ্রেশ পড়ে, তাই রিস্টার্ট ছাড়াই আপডেট হয়)
+function getAdminList() {
+  const candidates = [
+    path.join(process.cwd(), "config.json"),
+    path.join(__dirname, "../../config.json"),
+    path.join(__dirname, "../config.json"),
+    path.join(__dirname, "config.json")
+  ];
+
+  for (const p of candidates) {
+    try {
+      if (!fs.existsSync(p)) continue;
+      const cfg = JSON.parse(fs.readFileSync(p, "utf8"));
+      if (Array.isArray(cfg.ADMINBOT)) return cfg.ADMINBOT.map(String);
+    } catch (e) {}
+  }
+
+  // ফাইল না পেলে মেমরির config ব্যবহার
+  return ((global.config && global.config.ADMINBOT) || []).map(String);
+}
+
+function isBotAdmin(userID) {
+  return getAdminList().includes(String(userID));
+}
+
 function isBanned(threadID, threadData) {
   const db = getDB();
   if (db[threadID] && typeof db[threadID].banned !== "undefined") return !!db[threadID].banned;
   return !!(threadData && threadData.banned);
 }
 
+// ================= SOFT RESTART (HOT RELOAD) =================
+// Bot process বন্ধ হয় না, uptime ঠিক থাকে। শুধু কমান্ড ফাইলগুলো নতুন করে লোড হয়।
+async function softReload(ctx) {
+  const result = { loaded: 0, failed: [], removed: 0 };
+  const self = path.basename(__filename);
+
+  const disabled = getDisabled();
+  const files = fs
+    .readdirSync(COMMANDS_DIR)
+    .filter((f) => f.endsWith(".js") && f !== self)
+    .filter((f) => !disabled.includes(f.replace(/\.js$/, "")));
+
+  const commands = global.client && global.client.commands;
+  const eventReg = global.client && global.client.eventRegistered;
+  const fileNames = new Set(files.map((f) => f.replace(/\.js$/, "")));
+  const loadedNames = new Set();
+
+  for (const file of files) {
+    const full = path.join(COMMANDS_DIR, file);
+    try {
+      // পুরনো cache মুছে ফেলা
+      delete require.cache[require.resolve(full)];
+      const cmd = require(full);
+
+      if (!cmd || !cmd.config || !cmd.config.name)
+        throw new Error("config.name missing");
+      if (typeof cmd.run !== "function" && typeof cmd.onStart !== "function")
+        throw new Error("run function missing");
+
+      // onLoad থাকলে চালানো
+      if (typeof cmd.onLoad === "function") {
+        await cmd.onLoad({
+          api: ctx.api,
+          models: ctx.models,
+          Users: ctx.Users,
+          Threads: ctx.Threads,
+          Currencies: ctx.Currencies
+        });
+      }
+
+      if (commands) commands.set(cmd.config.name, cmd);
+
+      // handleEvent রেজিস্টার
+      if (eventReg && cmd.handleEvent && !eventReg.includes(cmd.config.name)) {
+        eventReg.push(cmd.config.name);
+      }
+
+      loadedNames.add(cmd.config.name);
+      result.loaded++;
+    } catch (e) {
+      result.failed.push(`${file}: ${e.message}`);
+    }
+  }
+
+  // যে কমান্ডের ফাইল আর নেই সেগুলো সরিয়ে দেওয়া
+  if (commands) {
+    for (const [key, cmd] of Array.from(commands)) {
+      if (cmd && cmd.config && cmd.config.name === "menu") continue;
+      const stillExists = fileNames.has(key) || loadedNames.has(key);
+      if (!stillExists) {
+        commands.delete(key);
+        if (eventReg) {
+          const i = eventReg.indexOf(key);
+          if (i !== -1) eventReg.splice(i, 1);
+        }
+        result.removed++;
+      }
+    }
+  }
+
+  return result;
+}
+
+// ================= DISABLED COMMANDS (ON/OFF) =================
+function getDisabled() {
+  const db = getDB();
+  return Array.isArray(db.__disabledCommands) ? db.__disabledCommands : [];
+}
+
+function saveDisabled(list) {
+  const db = getDB();
+  db.__disabledCommands = list;
+  saveDB(db);
+}
+
+function unregisterCommand(file) {
+  try {
+    const full = path.join(COMMANDS_DIR, `${file}.js`);
+    let name = file;
+    try {
+      const mod = require(full);
+      if (mod && mod.config && mod.config.name) name = mod.config.name;
+    } catch (_) {}
+
+    if (global.client && global.client.commands) global.client.commands.delete(name);
+    const reg = global.client && global.client.eventRegistered;
+    if (reg) {
+      const i = reg.indexOf(name);
+      if (i !== -1) reg.splice(i, 1);
+    }
+  } catch (_) {}
+}
+
+function applyDisabled() {
+  for (const f of getDisabled()) unregisterCommand(f);
+}
+
+// ================= RELOAD ONE COMMAND =================
+async function reloadOne(file, ctx) {
+  const safe = path.basename(file, ".js");
+  const full = path.join(COMMANDS_DIR, `${safe}.js`);
+  if (!fs.existsSync(full)) throw new Error("File not found");
+
+  delete require.cache[require.resolve(full)];
+  const cmd = require(full);
+
+  if (!cmd || !cmd.config || !cmd.config.name) throw new Error("config.name missing");
+  if (typeof cmd.run !== "function" && typeof cmd.onStart !== "function")
+    throw new Error("run function missing");
+
+  if (typeof cmd.onLoad === "function") {
+    await cmd.onLoad({
+      api: ctx.api,
+      models: ctx.models,
+      Users: ctx.Users,
+      Threads: ctx.Threads,
+      Currencies: ctx.Currencies
+    });
+  }
+
+  if (global.client && global.client.commands) global.client.commands.set(cmd.config.name, cmd);
+  const reg = global.client && global.client.eventRegistered;
+  if (reg && cmd.handleEvent && !reg.includes(cmd.config.name)) reg.push(cmd.config.name);
+
+  return cmd.config.name;
+}
+
+// ================= GROUP ON/OFF =================
+const PER_PAGE = 10;
+
+async function setThreadBan(threadID, val, Threads) {
+  const db = getDB();
+  db[threadID] = db[threadID] || {};
+  db[threadID].banned = val;
+  saveDB(db);
+
+  try {
+    const t = (await Threads.getData(threadID)) || {};
+    const d = t.data || {};
+    d.banned = val;
+    await Threads.setData(threadID, { data: d });
+    if (global.data && global.data.threadBanned) {
+      if (val) global.data.threadBanned.set(threadID, 1);
+      else global.data.threadBanned.delete(threadID);
+    }
+  } catch (e) {}
+}
+
+async function fetchGroups(Threads) {
+  try {
+    const all = await Threads.getAll(["threadID", "threadInfo"]);
+    return (all || [])
+      .filter((t) => t.threadInfo && t.threadInfo.isGroup !== false)
+      .map((t) => ({
+        id: String(t.threadID),
+        name: (t.threadInfo && t.threadInfo.threadName) || "Unnamed group"
+      }));
+  } catch (e) {
+    return [];
+  }
+}
+
+function groupPageText(groups, page) {
+  const db = getDB();
+  const totalPages = Math.max(1, Math.ceil(groups.length / PER_PAGE));
+  const start = page * PER_PAGE;
+  const slice = groups.slice(start, start + PER_PAGE);
+
+  const lines = slice.map((g, i) => {
+    const off = db[g.id] && db[g.id].banned;
+    return `【${mono(pad(start + i + 1))}】 ${off ? "🔴" : "🟢"} ${g.name}`;
+  });
+
+  return [
+    header("👥", "GROUP LIST"),
+    `\n◈ ${mono("Total")} ➜ ${mono(groups.length)}   ◈ ${mono("Page")} ➜ ${mono(page + 1 + "/" + totalPages)}`,
+    THIN,
+    lines.join("\n"),
+    footer("Reply number to toggle ON/OFF | n = next | p = prev")
+  ].join("\n");
+}
+
 // ================= CONFIG =================
 module.exports.config = {
   name: "menu",
-  version: "4.1.0",
-  hasPermssion: 1,
+  version: "4.2.0",
+  hasPermssion: 2,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "Pro control panel",
   commandCategory: "system",
@@ -108,8 +324,16 @@ module.exports.config = {
   cooldowns: 2
 };
 
+// বট চালু হওয়ার পর OFF করা কমান্ডগুলো আবার বন্ধ করে দেয়
+module.exports.onLoad = function () {
+  setTimeout(applyDisabled, 15000);
+};
+
 // ================= MENU UI =================
 module.exports.run = async function ({ api, event, Threads }) {
+  if (!isBotAdmin(event.senderID))
+    return api.sendMessage(`⛔ ${mono("Only bot admins can use this command.")}`, event.threadID, event.messageID);
+
   let data = {};
   try {
     data = (await Threads.getData(event.threadID))?.data || {};
@@ -130,7 +354,11 @@ module.exports.run = async function ({ api, event, Threads }) {
     `❸ 🗑️ ${mono("Delete command")}`,
     `❹ 🔴 ${mono("Turn OFF in this chat")}`,
     `❺ 🟢 ${mono("Turn ON in this chat")}`,
-    `❻ ♻️ ${mono("Restart bot")}`,
+    `❻ ♻️ ${mono("Full restart")}`,
+    `❼ 🔄 ${mono("Soft restart (reload commands)")}`,
+    `❽ 🔁 ${mono("Reload one command")}`,
+    `❾ 🎛️ ${mono("Command ON/OFF")}`,
+    `❿ 👥 ${mono("Group list ON/OFF")}`,
     footer("Reply with an option number")
   ].join("\n");
 
@@ -147,8 +375,10 @@ module.exports.run = async function ({ api, event, Threads }) {
 };
 
 // ================= HANDLE REPLY =================
-module.exports.handleReply = async function ({ api, event, handleReply, Threads }) {
+module.exports.handleReply = async function ({ api, event, handleReply, Threads, Users, Currencies, models }) {
   if (event.senderID !== handleReply.author) return;
+  if (!isBotAdmin(event.senderID))
+    return api.sendMessage(`⛔ ${mono("Only bot admins can use this command.")}`, event.threadID);
 
   const reply = (msg, cb) => api.sendMessage(msg, event.threadID, cb);
 
@@ -245,16 +475,205 @@ module.exports.handleReply = async function ({ api, event, handleReply, Threads 
         return reply(`🟢 ${mono("Bot has been turned ON in this group.")}`);
       }
 
-      // ♻️ RESTART
+      // ♻️ FULL RESTART
       case "6": {
+        logAction({ action: "Full restart", user: event.senderID, thread: event.threadID });
         return reply(`♻️ ${mono("Bot is restarting...")}`, () => {
           setTimeout(() => process.exit(1), 1200);
+        });
+      }
+
+      // 🔄 SOFT RESTART (bot stays online, uptime kept)
+      case "7": {
+        await reply(`🔄 ${mono("Reloading commands...")}`);
+
+        try {
+          const res = await softReload({ api, models, Users, Threads, Currencies });
+
+          logAction({
+            action: `Soft restart (loaded ${res.loaded}, failed ${res.failed.length})`,
+            user: event.senderID,
+            thread: event.threadID
+          });
+
+          const lines = [
+            header("🔄", "SOFT RESTART DONE"),
+            section("RESULT"),
+            `◈ ${mono("Loaded")}  ➜ ${mono(res.loaded)} ✅`,
+            `◈ ${mono("Removed")} ➜ ${mono(res.removed)}`,
+            `◈ ${mono("Failed")}  ➜ ${mono(res.failed.length)} ${res.failed.length ? "❌" : "✅"}`,
+            `◈ ${mono("Uptime")}  ➜ ${mono(getUptime())} (kept)`
+          ];
+
+          if (res.failed.length) {
+            lines.push(section("ERRORS"));
+            lines.push(res.failed.slice(0, 10).map((f) => `• ${f}`).join("\n"));
+          }
+
+          return reply(lines.join("\n"));
+        } catch (e) {
+          return reply(`❌ ${mono("Soft restart failed")}: ${mono(e.message)}`);
+        }
+      }
+
+      // 🔁 RELOAD ONE COMMAND
+      case "8": {
+        const cmds = listCommands();
+        return reply(
+          [header("🔁", "RELOAD COMMAND"), `\n${cmdList(cmds)}`, footer("Reply with the number to reload")].join("\n"),
+          (err, info) => {
+            if (err) return;
+            global.client.handleReply.push({
+              name: module.exports.config.name,
+              messageID: info.messageID,
+              author: event.senderID,
+              type: "reloadPick",
+              cmds
+            });
+          }
+        );
+      }
+
+      // 🎛️ COMMAND ON/OFF
+      case "9": {
+        const cmds = listCommands();
+        const dis = getDisabled();
+        const lines = cmds.map(
+          (c, i) => `【${mono(pad(i + 1))}】 ${dis.includes(c) ? "🔴" : "🟢"} ${mono(c)}`
+        );
+        return reply(
+          [header("🎛️", "COMMAND ON/OFF"), `\n${lines.join("\n")}`, footer("Reply with the number to toggle")].join("\n"),
+          (err, info) => {
+            if (err) return;
+            global.client.handleReply.push({
+              name: module.exports.config.name,
+              messageID: info.messageID,
+              author: event.senderID,
+              type: "togglePick",
+              cmds
+            });
+          }
+        );
+      }
+
+      // 👥 GROUP LIST ON/OFF
+      case "10": {
+        const groups = await fetchGroups(Threads);
+        if (!groups.length) return reply(`❌ ${mono("No groups found")}`);
+
+        return reply(groupPageText(groups, 0), (err, info) => {
+          if (err) return;
+          global.client.handleReply.push({
+            name: module.exports.config.name,
+            messageID: info.messageID,
+            author: event.senderID,
+            type: "groupPick",
+            groups,
+            page: 0
+          });
         });
       }
 
       default:
         return reply(`❌ ${mono("Invalid option")}`);
     }
+  }
+
+  // ================= RELOAD PICK =================
+  if (handleReply.type === "reloadPick") {
+    const idx = parseInt(event.body, 10) - 1;
+    const list = handleReply.cmds;
+    if (isNaN(idx) || idx < 0 || idx >= list.length) return reply(`❌ ${mono("Invalid number")}`);
+
+    const file = list[idx];
+    if (getDisabled().includes(file))
+      return reply(`⚠️ ${mono(file)} ${mono("is OFF. Turn it ON first.")}`);
+
+    try {
+      const name = await reloadOne(file, { api, models, Users, Threads, Currencies });
+      logAction({ action: `Reloaded command: ${file}.js`, user: event.senderID, thread: event.threadID });
+      return reply(
+        [header("✅", "RELOADED"), `\n◈ ${mono("File")} ➜ ${mono(file + ".js")}`, `◈ ${mono("Name")} ➜ ${mono(name)}`].join("\n")
+      );
+    } catch (e) {
+      return reply(`❌ ${mono("Reload failed")}: ${mono(e.message)}`);
+    }
+  }
+
+  // ================= TOGGLE COMMAND PICK =================
+  if (handleReply.type === "togglePick") {
+    const idx = parseInt(event.body, 10) - 1;
+    const list = handleReply.cmds;
+    if (isNaN(idx) || idx < 0 || idx >= list.length) return reply(`❌ ${mono("Invalid number")}`);
+
+    const file = list[idx];
+    if (file === "menu") return reply(`❌ ${mono("You cannot turn OFF the menu command")}`);
+
+    let dis = getDisabled();
+
+    if (dis.includes(file)) {
+      // TURN ON
+      try {
+        await reloadOne(file, { api, models, Users, Threads, Currencies });
+        dis = dis.filter((f) => f !== file);
+        saveDisabled(dis);
+        logAction({ action: `Command ON: ${file}`, user: event.senderID, thread: event.threadID });
+        return reply(`🟢 ${mono(file)} ${mono("is now ON")}`);
+      } catch (e) {
+        return reply(`❌ ${mono("Failed to turn ON")}: ${mono(e.message)}`);
+      }
+    }
+
+    // TURN OFF
+    dis.push(file);
+    saveDisabled(dis);
+    unregisterCommand(file);
+    logAction({ action: `Command OFF: ${file}`, user: event.senderID, thread: event.threadID });
+    return reply(`🔴 ${mono(file)} ${mono("is now OFF")}`);
+  }
+
+  // ================= GROUP PICK =================
+  if (handleReply.type === "groupPick") {
+    const body = (event.body || "").trim().toLowerCase();
+    const groups = handleReply.groups;
+    const totalPages = Math.max(1, Math.ceil(groups.length / PER_PAGE));
+
+    // PAGING
+    if (["n", "next", "p", "prev"].includes(body)) {
+      let page = handleReply.page + (body.startsWith("n") ? 1 : -1);
+      if (page < 0 || page >= totalPages) return reply(`❌ ${mono("No more pages")}`);
+
+      return reply(groupPageText(groups, page), (err, info) => {
+        if (err) return;
+        global.client.handleReply.push({
+          name: module.exports.config.name,
+          messageID: info.messageID,
+          author: event.senderID,
+          type: "groupPick",
+          groups,
+          page
+        });
+      });
+    }
+
+    // TOGGLE
+    const idx = parseInt(body, 10) - 1;
+    const start = handleReply.page * PER_PAGE;
+    if (isNaN(idx) || idx < start || idx >= Math.min(groups.length, start + PER_PAGE))
+      return reply(`❌ ${mono("Invalid number")}`);
+
+    const g = groups[idx];
+    const db = getDB();
+    const wasOff = db[g.id] && db[g.id].banned;
+    await setThreadBan(g.id, wasOff ? 0 : 1, Threads);
+
+    logAction({
+      action: `Group ${wasOff ? "ON" : "OFF"}: ${g.name}`,
+      user: event.senderID,
+      thread: event.threadID
+    });
+
+    return reply(`${wasOff ? "🟢" : "🔴"} ${g.name} ➜ ${mono(wasOff ? "ON" : "OFF")}`);
   }
 
   // ================= DELETE PICK =================
