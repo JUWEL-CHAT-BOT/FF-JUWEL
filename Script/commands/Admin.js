@@ -34,9 +34,8 @@ module.exports.run = async function ({ api, event }) {
 
   const design = `
 ╔══════════════════════╗
-║   🩷 ${bold("ADMIN NOTICE")} 🩷   ║
+║ 👑 ${bold("ADMIN")} 🩷   
 ╚══════════════════════╝
-
 ┏━━━ 👤 ${bold("PERSONAL INFO")} ━━━┓
 ┃ 🧑 ${bold("Name")}      ›  ${bold("JUWEL")}
 ┃ 🎭 ${bold("Nick")}      ›  ${bold("MR JUWEL")}
@@ -49,7 +48,6 @@ module.exports.run = async function ({ api, event }) {
 ┃ 🕌 ${bold("Religion")}  ›  ${bold("ISLAM")}
 ┃ 🏡 ${bold("Address")}   ›  ${bold("RANGPUR")}
 ┗━━━━━━━━━━━━━━━━━━━━━┛
-
 ┏━━━ 💫 ${bold("PERSONALITY")} ━━━┓
 ┃ 😈 ${bold("Attitude")}  ›  ${bold("KING")}
 ┃ 🎮 ${bold("FF")}        ›  ${bold("LOVER")}
@@ -57,7 +55,6 @@ module.exports.run = async function ({ api, event }) {
 ┃ 💰 ${bold("Work")}      ›  ${bold("CONTRACTION")}
 ┃ ❤️ ${bold("Relation")}  ›  ${bold("SINGEL")}
 ┗━━━━━━━━━━━━━━━━━━━━━┛
-
 ┏━━━ 🌐 ${bold("SOCIAL LINKS")} ━━━┓
 ┃ 📘 ${bold("Messenger")} ›  ${bold("mrjuwel444")}
 ┃ 📱 ${bold("WhatsApp")}  ›  ${bold("+8801943488192")}
@@ -66,14 +63,12 @@ module.exports.run = async function ({ api, event }) {
 ┃ ✈️ ${bold("Telegram")}  ›  ${bold("mrjuwel2025")}
 ┃ 📧 ${bold("Email")}     ›  ${bold("mrjuwel315@gmail.com")}
 ┗━━━━━━━━━━━━━━━━━━━━━┛
-
 ┏━━━ 🔗 ${bold("DIRECT LINK")} ━━━┓
-┃ Facebook  : fb.com/mrjuwel444
-┃ Messenger : m.me/mejuwel444
+┃ Facebook  : https://www.fb.com/mrjuwel444
+┃ Messenger : https://www.m.me/mrjuwel444
 ┗━━━━━━━━━━━━━━━━━━━━━┛
-
 ╔══════════════════════╗
-║  🕒 ${bold("Updated")}: ${bold(time)}  ║
+║  🕒 ${bold("Updated")}: ${bold(time)}  
 ╚══════════════════════╝
 `;
 
