@@ -4,7 +4,7 @@ const path = require("path");
 
 module.exports.config = {
   name: "prefix",
-  version: "3.1.0",
+  version: "3.2.0",
   hasPermssion: 0,
   credits: "MR JUWEL",
   description: "Show bot prefix, owner info, system stats & command list",
@@ -14,8 +14,11 @@ module.exports.config = {
 };
 
 // Put your own links here
-const OWNER_FB_LINK = "https://www.facebook.com/share/1EUpcWUrZ6/";
+const OWNER_FB_LINK = "https://www.fb.com/mrjuwel444";
 const SUPPORT_LINK = "https://m.me/your.support.group";
+
+// Auto delete time for the info card (20 seconds)
+const DELETE_AFTER = 20000;
 
 // Anti-spam store (used by handleEvent only)
 const spamMap = new Map();
@@ -176,15 +179,10 @@ ${list}
   const cpuCores = cpus.length;
   const load = os.loadavg()[0].toFixed(2);
 
-  // Measure ping
-  const start = Date.now();
-  api.sendMessage(f("Collecting info..."), threadID, (err, info) => {
-    const ping = Date.now() - start;
-    if (!err && info) {
-      try { api.unsendMessage(info.messageID); } catch (e) {}
-    }
+  // Ping (no extra message needed)
+  const ping = event.timestamp ? Math.max(Date.now() - event.timestamp, 0) : 0;
 
-    return api.sendMessage(
+  const msg =
 `╭─────────────⭓
 │  ✨ ${f("PREFIX")} ✨
 │  ➤ 『 ${prefix} 』
@@ -206,9 +204,18 @@ ${list}
 │  🔗 ${f("Owner:")} ${OWNER_FB_LINK}
 │  💬 ${f("Support:")} ${SUPPORT_LINK}
 │  📜 ${f("Command List:")} ${prefix}prefix help
-╰─────────────⭓`,
-      threadID,
-      messageID
-    );
-  });
+╰─────────────⭓`;
+
+  return api.sendMessage(
+    msg,
+    threadID,
+    (err, info) => {
+      if (err || !info) return;
+      // Auto delete after 20 seconds
+      setTimeout(() => {
+        try { api.unsendMessage(info.messageID); } catch (e) {}
+      }, DELETE_AFTER);
+    },
+    messageID
+  );
 };
