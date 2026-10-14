@@ -102,7 +102,7 @@ module.exports.run = async function ({ api, event }) {
   await new Promise(r => setTimeout(r, 10000));
 
   await api.sendMessage(
-`╔━━❖ 🇧🇩 FB CLEANER ❖━━╗
+`╔━━❖  FB CLEANER ❖━━╗
 ┃
 ┃ 👥 নষ্ট আইডি : ${badUsers.length} জন
 ┃
@@ -146,7 +146,6 @@ ${failedNames}┣━━━━━━━━━━━━━━━━━━
 ┃    নষ্ট আইডি কিক দেওয়া হয়েছে!
 ┃
 ┃ 🛡️ গ্রুপ পরিষ্কার হয়ে গেছে
-┃ 🇧🇩 Bangladesh Security System
 ┃
 ╚━━❖ POWERED BY BOT ❖━━╝`,
     threadID, messageID
