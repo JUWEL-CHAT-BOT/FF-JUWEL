@@ -1,6 +1,6 @@
 module.exports.config = {
 	name: "adduser",
-	version: "5.2.0",
+	version: "6.0.0",
 	hasPermssion: 0,
 	credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
 	description: "Add user to group by UID or Facebook link (bot admin only)",
@@ -29,13 +29,13 @@ async function getUID(url) {
 		});
 		const data = res.data;
 
-		let uid =
+		const uid =
 			data.match(/"userID":"(\d+)"/)?.[1] ||
 			data.match(/"entity_id":"(\d+)"/)?.[1] ||
 			data.match(/"profile_id":"(\d+)"/)?.[1] ||
 			data.match(/profile\.php\?id=(\d+)/)?.[1];
 
-		let name =
+		const name =
 			data.match(/<title>(.*?)<\/title>/)?.[1]?.replace(" | Facebook", "") ||
 			"Facebook User";
 
@@ -47,17 +47,42 @@ async function getUID(url) {
 }
 
 //━━━━━━━━━━━━━━━
-// ✅ CHECK BOT ADMIN (config.json)
+// ✅ GET NAMES FROM UIDs
+//━━━━━━━━━━━━━━━
+async function getUserNames(api, ids) {
+	try {
+		const info = await new Promise((resolve, reject) => {
+			api.getUserInfo(ids, (err, data) => (err ? reject(err) : resolve(data)));
+		});
+		const result = {};
+		for (const id of ids) result[id] = info?.[id]?.name || "Admin";
+		return result;
+	} catch (e) {
+		const result = {};
+		for (const id of ids) result[id] = "Admin";
+		return result;
+	}
+}
+
+//━━━━━━━━━━━━━━━
+// ✅ CHECK BOT ADMIN (config.json → ADMINBOT)
 //━━━━━━━━━━━━━━━
 function isBotAdmin(senderID) {
 	try {
-		const configPath = path.join(__dirname, "..", "..", "config.json");
-		if (!fs.existsSync(configPath)) return false;
+		const candidates = [
+			path.join(process.cwd(), "config.json"),
+			path.join(__dirname, "..", "..", "config.json"),
+			path.join(__dirname, "..", "config.json")
+		];
+
+		const configPath = candidates.find(p => fs.existsSync(p));
+		if (!configPath) return false;
 
 		const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 		const admins = (config.ADMINBOT || []).map(String);
 		return admins.includes(String(senderID));
 	} catch (e) {
+		console.log("[adduser] config read error:", e.message);
 		return false;
 	}
 }
@@ -67,7 +92,6 @@ function isBotAdmin(senderID) {
 //━━━━━━━━━━━━━━━
 async function safeGetThreadInfo(api, threadID) {
 	try {
-		// Method 1: getThreadInfo
 		if (typeof api.getThreadInfo === "function") {
 			const info = await api.getThreadInfo(threadID);
 			if (info) return info;
@@ -77,7 +101,6 @@ async function safeGetThreadInfo(api, threadID) {
 	}
 
 	try {
-		// Method 2: getThreadInfo (older) / getThreadList
 		if (typeof api.getThreadList === "function") {
 			const list = await api.getThreadList(50, null, ["INBOX"]);
 			const t = list.find(x => x.threadID == threadID);
@@ -91,14 +114,25 @@ async function safeGetThreadInfo(api, threadID) {
 }
 
 //━━━━━━━━━━━━━━━
+// ✅ CHECK USER IN GROUP (fresh)
+// true = আছে | false = নেই | null = যাচাই করা যায়নি
+//━━━━━━━━━━━━━━━
+async function isUserInGroup(api, threadID, uid) {
+	await new Promise(r => setTimeout(r, 3000));
+	const info = await safeGetThreadInfo(api, threadID);
+	if (!info || !Array.isArray(info.participantIDs)) return null;
+	return info.participantIDs.map(String).includes(String(uid));
+}
+
+//━━━━━━━━━━━━━━━
 // ✅ MAIN RUN
 //━━━━━━━━━━━━━━━
 module.exports.run = async function ({ api, event, args }) {
 	const { threadID, messageID, senderID } = event;
-	const botID = api.getCurrentUserID();
+	const botID = String(api.getCurrentUserID());
 	const send = (msg) => api.sendMessage(msg, threadID, messageID);
 
-	// ❌ BOT ADMIN CHECK
+	// ❌ BOT ADMIN CHECK (config.json)
 	if (!isBotAdmin(senderID)) {
 		return send(`╭━━━❌ ACCESS DENIED ❌━━━╮
 ┃
@@ -117,7 +151,6 @@ module.exports.run = async function ({ api, event, args }) {
 ╰━━━━━━━━━━━━━━━━━━╯`);
 	}
 
-	// ✅ THREAD INFO (safe)
 	const loadingMsg = await api.sendMessage(
 		`╭━━━⏳ PROCESSING ⏳━━━╮
 ┃
@@ -128,18 +161,9 @@ module.exports.run = async function ({ api, event, args }) {
 		threadID
 	);
 
-	const threadInfo = await safeGetThreadInfo(api, threadID);
-
-	// ⚠️ Fallback: threadInfo না পেলেও কাজ চালু রাখবো
-	let participantIDs = [];
-	let adminIDs = [];
-	let isBotAdminInGroup = false;
-
-	if (threadInfo) {
-		participantIDs = (threadInfo.participantIDs || []).map(String);
-		adminIDs = (threadInfo.adminIDs || []).map(e => String(e.id || e));
-		isBotAdminInGroup = adminIDs.includes(String(botID));
-	}
+	const removeLoading = () => {
+		try { api.unsendMessage(loadingMsg.messageID); } catch (e) {}
+	};
 
 	// UID / LINK
 	let uid;
@@ -147,10 +171,12 @@ module.exports.run = async function ({ api, event, args }) {
 
 	if (!isNaN(args[0])) {
 		uid = String(args[0]);
+		const names = await getUserNames(api, [uid]);
+		name = names[uid] === "Admin" ? "Facebook User" : names[uid];
 	} else {
 		const [id, userName, fail] = await getUID(args[0]);
 		if (fail || !id) {
-			api.unsendMessage(loadingMsg.messageID);
+			removeLoading();
 			return send(`╭━━━❌ FAILED ❌━━━╮
 ┃
 ┃ ⚠️ Facebook UID বের করা যায়নি!
@@ -160,55 +186,60 @@ module.exports.run = async function ({ api, event, args }) {
 		name = userName;
 	}
 
-	// ALREADY IN GROUP (শুধু info থাকলে চেক করবো)
-	if (participantIDs.length > 0 && participantIDs.includes(uid)) {
-		api.unsendMessage(loadingMsg.messageID);
-		return send(`╭━━━⚠️ USER EXIST ⚠️━━━╮
+	// ✅ THREAD INFO (আগে থেকে: approval mode, admin list, bot admin কিনা)
+	const beforeInfo = await safeGetThreadInfo(api, threadID);
+
+	let adminIDs = [];
+	let approvalMode = false;
+	let isBotAdminInGroup = false;
+
+	if (beforeInfo) {
+		adminIDs = (beforeInfo.adminIDs || []).map(e => String(e.id || e));
+		approvalMode = beforeInfo.approvalMode === true || beforeInfo.approvalMode === 1;
+		isBotAdminInGroup = adminIDs.includes(botID);
+
+		// ALREADY IN GROUP
+		if ((beforeInfo.participantIDs || []).map(String).includes(uid)) {
+			removeLoading();
+			return send(`╭━━━⚠️ USER EXIST ⚠️━━━╮
 ┃
 ┃ 👤 ${name}
 ┃ 🆔 ${uid}
 ┃
 ┃ আগে থেকেই গ্রুপে আছে।
 ╰━━━━━━━━━━━━━━━━━━╯`);
+		}
 	}
 
 	//━━━━━━━━━━━━━━━
 	// ✅ ADD USER
 	//━━━━━━━━━━━━━━━
 	try {
-		// 🔥 Argument order try: (userID, threadID)
-		await api.addUserToGroup(uid, threadID);
+		let added = false;
+		let lastErr;
 
-		api.unsendMessage(loadingMsg.messageID);
-
-		if (!isBotAdminInGroup && threadInfo) {
-			return send(`╭━━━⏳ WAITING ADMIN ⏳━━━╮
-┃
-┃ 👤 Name : ${name}
-┃ 🆔 UID  : ${uid}
-┃
-┃ ✅ Join request পাঠানো হয়েছে।
-┃ ⚠️ বট এডমিন নয়, তাই
-┃ গ্রুপ এডমিন Approve করলে
-┃ ইউজার যোগ হবে।
-╰━━━━━━━━━━━━━━━━━━╯`);
+		try {
+			await api.addUserToGroup(uid, threadID);
+			added = true;
+		} catch (e1) {
+			lastErr = e1;
+			try {
+				await api.addUserToGroup(threadID, uid);
+				added = true;
+			} catch (e2) {
+				lastErr = e2;
+			}
 		}
 
-		return send(`╭━━━✅ USER ADDED ✅━━━╮
-┃
-┃ 👤 Name : ${name}
-┃ 🆔 UID  : ${uid}
-┃
-┃ 🎉 সফলভাবে গ্রুপে এড করা হয়েছে!
-╰━━━━━━━━━━━━━━━━━━╯`);
+		removeLoading();
 
-	} catch (e) {
-		console.log("[adduser] addUserToGroup error:", e);
+		if (!added) throw lastErr;
 
-		// 🔁 Argument order swap try
-		try {
-			await api.addUserToGroup(threadID, uid);
-			api.unsendMessage(loadingMsg.messageID);
+		// ✅ আসলেই গ্রুপে ঢুকেছে কিনা যাচাই
+		const inGroup = await isUserInGroup(api, threadID, uid);
+
+		// 🎉 সরাসরি অ্যাড হয়ে গেছে
+		if (inGroup === true) {
 			return send(`╭━━━✅ USER ADDED ✅━━━╮
 ┃
 ┃ 👤 Name : ${name}
@@ -216,9 +247,67 @@ module.exports.run = async function ({ api, event, args }) {
 ┃
 ┃ 🎉 সফলভাবে গ্রুপে এড করা হয়েছে!
 ╰━━━━━━━━━━━━━━━━━━╯`);
-		} catch (e2) {
-			api.unsendMessage(loadingMsg.messageID);
-			return send(`╭━━━❌ ADD FAILED ❌━━━╮
+		}
+
+		// 🔔 APPROVAL চালু → গ্রুপ এডমিনদের মেনশন
+		if (approvalMode) {
+			const admins = adminIDs.filter(id => id !== botID).slice(0, 15);
+
+			let body = `╭━━━🔔 APPROVAL NEEDED 🔔━━━╮
+┃
+┃ 👤 Name : ${name}
+┃ 🆔 UID  : ${uid}
+┃
+┃ ✅ বট এই ইউজারকে এড করেছে।
+┃ ⚠️ গ্রুপে Approval চালু আছে,
+┃ তাই কোনো এডমিন তাকে
+┃ Approve করে এড করে দিন।
+╰━━━━━━━━━━━━━━━━━━╯`;
+
+			const mentions = [];
+
+			if (admins.length > 0) {
+				const names = await getUserNames(api, admins);
+				body += "\n\n👮 Admins:";
+				for (const id of admins) {
+					const tag = "@" + names[id];
+					body += "\n";
+					const fromIndex = body.length;
+					body += tag;
+					mentions.push({ tag, id, fromIndex });
+				}
+			}
+
+			return api.sendMessage({ body, mentions }, threadID, messageID);
+		}
+
+		// ⚠️ APPROVAL বন্ধ, কিন্তু বট এডমিন নয় → জয়েন রিকুয়েস্ট
+		if (!isBotAdminInGroup) {
+			return send(`╭━━━⏳ JOIN REQUEST ⏳━━━╮
+┃
+┃ 👤 Name : ${name}
+┃ 🆔 UID  : ${uid}
+┃
+┃ ✅ Join request পাঠানো হয়েছে।
+┃ ⚠️ বট এই গ্রুপের এডমিন নয়,
+┃ তাই সরাসরি এড করতে পারেনি।
+╰━━━━━━━━━━━━━━━━━━╯`);
+		}
+
+		// যাচাই করা যায়নি
+		return send(`╭━━━✅ REQUEST SENT ✅━━━╮
+┃
+┃ 👤 Name : ${name}
+┃ 🆔 UID  : ${uid}
+┃
+┃ অ্যাড রিকুয়েস্ট সফল হয়েছে,
+┃ তবে স্ট্যাটাস যাচাই করা যায়নি।
+╰━━━━━━━━━━━━━━━━━━╯`);
+
+	} catch (e) {
+		removeLoading();
+		console.log("[adduser] addUserToGroup error:", e);
+		return send(`╭━━━❌ ADD FAILED ❌━━━╮
 ┃
 ┃ ⚠️ ইউজারকে এড করা যায়নি!
 ┃
@@ -229,8 +318,7 @@ module.exports.run = async function ({ api, event, args }) {
 ┃ • Invalid UID
 ┃ • Bot Not Admin in Group
 ┃
-┃ 🛠 Error: ${(e.message || "Unknown").slice(0, 100)}
+┃ 🛠 Error: ${String((e && (e.message || e.error)) || "Unknown").slice(0, 100)}
 ╰━━━━━━━━━━━━━━━━━━╯`);
-		}
 	}
 };
