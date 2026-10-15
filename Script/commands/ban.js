@@ -40,9 +40,9 @@ function loadBan() {
 
     global.data.userBanned.clear();
     for (let id in data) {
-      // শুধু মেয়াদ উত্তীর্ণ নয় এমন ডেটা লোড করুন
+      // মেয়াদ উত্তীর্ণ হলে skip
       if (data[id].expire && Date.now() > data[id].expire) {
-        continue; // মেয়াদ উত্তীর্ণ skip
+        continue;
       }
       global.data.userBanned.set(id, data[id]);
     }
@@ -95,7 +95,7 @@ loadBan();
 // =========================
 module.exports.config = {
   name: "ban",
-  version: "4.2.0",
+  version: "4.3.0",
   hasPermssion: 2,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "Mirai Stable Ban System with Persistent Storage",
@@ -107,10 +107,10 @@ module.exports.config = {
 // HANDLE EVENT (অটো ব্লক)
 // =========================
 module.exports.handleEvent = async ({ event, api }) => {
-  // ✅ শুধু মেসেজ টাইপ ইভেন্টে কাজ করুন (রিপ্লাই/রিয়েকশনে নয়)
+  // শুধু মেসেজ টাইপ ইভেন্টে কাজ করুন (রিপ্লাই/রিয়েকশনে নয়)
   if (event.type !== "message") return;
 
-  // ✅ বট নিজে হলে skip করুন
+  // বট নিজে হলে skip করুন
   if (event.senderID === api.getCurrentUserID()) return;
 
   const { senderID, threadID, messageID } = event;
@@ -118,7 +118,7 @@ module.exports.handleEvent = async ({ event, api }) => {
   const banData = global.data.userBanned.get(senderID);
   if (!banData) return;
 
-  // ✅ Anti-spam cooldown (১০ সেকেন্ডে একবার)
+  // Anti-spam cooldown (১০ সেকেন্ডে একবার)
   const lastNotify = global.data.banCooldown.get(senderID) || 0;
   if (Date.now() - lastNotify < 10000) return;
   global.data.banCooldown.set(senderID, Date.now());
@@ -163,7 +163,7 @@ module.exports.handleEvent = async ({ event, api }) => {
     timeMsg = `\n⏳ বাকি: ${remaining}`;
   }
 
-  // ✅ ব্যান ইউজারের মেসেজ auto-unsend করুন
+  // ব্যান ইউজারের মেসেজ auto-unsend করুন
   if (messageID) {
     api.unsendMessage(messageID).catch(() => {});
   }
@@ -183,12 +183,52 @@ module.exports.run = async ({ event, api, args }) => {
   const cmd = fullMsg.split(" ")[0].toLowerCase();
 
   // =========================
+  // BANLIST (সব একসাথে, এক মেসেজে)
+  // টার্গেট UID চেকের আগেই থাকতে হবে
+  // =========================
+  if (cmd === "banlist" || cmd === "/banlist") {
+    const bannedUsers = Array.from(global.data.userBanned.entries());
+
+    if (bannedUsers.length === 0) {
+      return api.sendMessage("📋 কোনো ব্যান করা ইউজার নেই", threadID, messageID);
+    }
+
+    // সবার নাম এক কলে আনুন
+    let infoMap = {};
+    try {
+      infoMap = (await api.getUserInfo(bannedUsers.map(([id]) => id))) || {};
+    } catch (error) {
+      console.error("ইউজারের নাম বের করতে সমস্যা:", error);
+    }
+
+    let listMessage = `╔══════ BAN LIST (${bannedUsers.length}) ══════╗\n`;
+
+    bannedUsers.forEach(([id, data], i) => {
+      const userName = (infoMap[id] && infoMap[id].name) || data.userName || "অজানা";
+      const timeLeft = data.expire
+        ? `⏳ ${getTimeRemaining(data.expire)}`
+        : "♾️ স্থায়ী";
+
+      listMessage +=
+        `\n${i + 1}. 👤 ${userName}\n` +
+        `   🆔 ${id}\n` +
+        `   📝 ${data.reason}\n` +
+        `   ${timeLeft}\n` +
+        `   👮 ${data.byName || "অজানা"}\n`;
+    });
+
+    listMessage += "╚═══════════════════════╝";
+
+    return api.sendMessage(listMessage, threadID, messageID);
+  }
+
+  // =========================
   // টার্গেট আইডি বের করুন
   // =========================
   let targetID = null;
   let startIdx = 1;
 
-  // ১. রিপ্লাই চেক (✅ senderID আছে কিনা নিশ্চিত করুন)
+  // ১. রিপ্লাই চেক
   if (messageReply && messageReply.senderID) {
     targetID = messageReply.senderID;
     startIdx = 1;
@@ -366,44 +406,5 @@ module.exports.run = async ({ event, api, args }) => {
       threadID,
       messageID
     );
-  }
-
-  // =========================
-  // BANLIST
-  // =========================
-  if (cmd === "banlist" || cmd === "/banlist") {
-    const bannedUsers = Array.from(global.data.userBanned.entries());
-
-    if (bannedUsers.length === 0) {
-      return api.sendMessage("📋 কোনো ব্যান করা ইউজার নেই", threadID, messageID);
-    }
-
-    let listMessage = "╔══════ BAN LIST ══════╗\n";
-
-    for (const [id, data] of bannedUsers) {
-      // ইউজারের নাম বের করুন
-      let userName = data.userName || "অজানা";
-      try {
-        const userInfo = await api.getUserInfo(id);
-        if (userInfo && userInfo[id]) {
-          userName = userInfo[id].name || data.userName || "অজানা";
-        }
-      } catch (error) {
-        console.error("ইউজারের নাম বের করতে সমস্যা:", error);
-      }
-
-      const timeLeft = data.expire
-        ? `⏳ ${getTimeRemaining(data.expire)}`
-        : "♾️ স্থায়ী";
-
-      listMessage += `\n👤 ${userName}\n`;
-      listMessage += `   🆔 ${id}\n`;
-      listMessage += `   📝 ${data.reason}\n`;
-      listMessage += `   ${timeLeft}\n`;
-      listMessage += `   👮 ${data.byName || "অজানা"}\n`;
-    }
-    listMessage += "╚═══════════════════════╝";
-
-    return api.sendMessage(listMessage, threadID, messageID);
   }
 };
