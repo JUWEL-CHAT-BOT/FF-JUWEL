@@ -1,6 +1,6 @@
 module.exports.config = {
     name: "listadmin",
-    version: "3.2.0",
+    version: "3.3.0",
     hasPermssion: 0,
     credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
     description: "Group & Bot Admin List with Full Features",
@@ -27,18 +27,26 @@ function setCache(key, value) {
     cache.set(key, { value, time: Date.now() });
 }
 
+// ───── UID বের করার helper (যেকোনো ফরম্যাট সাপোর্ট) ─────
+function getUID(ad) {
+    if (ad === null || ad === undefined) return null;
+    if (typeof ad === "string" || typeof ad === "number") return String(ad);
+    const id = ad.id || ad.userID || ad.uid || ad.userFbId || ad.userId || "";
+    return id ? String(id) : null;
+}
+
 // ───── USER NAME FETCH (Facebook নাম) ─────
 async function fetchUserName(api, uid) {
+    uid = String(uid);
     const cached = getCache(`user_${uid}`);
     if (cached) return cached;
 
+    // প্রথম চেষ্টা: getUserInfo
     try {
-        // প্রথমে getUserInfo দিয়ে চেষ্টা
         const info = await api.getUserInfo(uid);
-        const user = info[uid];
+        const user = info && (info[uid] || info[Number(uid)]);
 
         if (user) {
-            // Facebook এ যে নামে আছে সেটা নেওয়া
             const name =
                 user.name ||
                 (user.firstName && user.lastName
@@ -46,28 +54,45 @@ async function fetchUserName(api, uid) {
                     : null) ||
                 user.firstName ||
                 user.vanity ||
-                "Unknown";
+                null;
 
-            setCache(`user_${uid}`, name);
-            return name;
+            if (name) {
+                setCache(`user_${uid}`, name);
+                return name;
+            }
         }
     } catch {}
 
-    // দ্বিতীয় চেষ্টা: getUserProfile
+    // দ্বিতীয় চেষ্টা: getUserProfile (থাকলে)
     try {
-        const profile = await api.getUserProfile(uid);
-        if (profile) {
-            const name =
-                profile.name ||
-                profile.fullName ||
-                (profile.firstName && profile.lastName
-                    ? `${profile.firstName} ${profile.lastName}`
-                    : null) ||
-                profile.firstName ||
-                "Unknown";
+        if (typeof api.getUserProfile === "function") {
+            const profile = await api.getUserProfile(uid);
+            if (profile) {
+                const name =
+                    profile.name ||
+                    profile.fullName ||
+                    (profile.firstName && profile.lastName
+                        ? `${profile.firstName} ${profile.lastName}`
+                        : null) ||
+                    profile.firstName ||
+                    null;
 
-            setCache(`user_${uid}`, name);
-            return name;
+                if (name) {
+                    setCache(`user_${uid}`, name);
+                    return name;
+                }
+            }
+        }
+    } catch {}
+
+    // তৃতীয় চেষ্টা: Users ডাটাবেস (থাকলে)
+    try {
+        if (global.data?.userName?.has(uid)) {
+            const name = global.data.userName.get(uid);
+            if (name) {
+                setCache(`user_${uid}`, name);
+                return name;
+            }
         }
     } catch {}
 
@@ -75,23 +100,29 @@ async function fetchUserName(api, uid) {
 }
 
 // ───── PERMISSION CHECK ─────
-function isGroupAdmin(userID, adminIDs) {
-    return adminIDs.some(ad => ad.id === userID);
+function getBotAdmins() {
+    const list = global.config?.ADMINBOT || global.config?.adminBot || [];
+    return [...new Set(list.map(String))];
+}
+
+function isGroupAdmin(userID, adminUIDs) {
+    return adminUIDs.includes(String(userID));
 }
 
 function isBotAdmin(userID) {
-    const botAdmins = global.config?.ADMINBOT || global.config?.adminBot || [];
-    return botAdmins.map(String).includes(String(userID));
+    return getBotAdmins().includes(String(userID));
 }
 
 // ───── PAGINATION ─────
 function paginate(arr, page, perPage = 5) {
     const total = Math.ceil(arr.length / perPage) || 1;
-    const start = (page - 1) * perPage;
+    const current = Math.min(Math.max(page, 1), total);
+    const start = (current - 1) * perPage;
     return {
         items: arr.slice(start, start + perPage),
         total,
-        current: page
+        current,
+        perPage
     };
 }
 
@@ -108,7 +139,10 @@ function getCreatedTime(threadInfo) {
 
         if (!raw) return "অজানা";
 
-        const ms = raw * 1000 > 1e12 ? raw : raw * 1000;
+        const num = Number(raw);
+        if (isNaN(num)) return "অজানা";
+
+        const ms = num > 1e12 ? num : num * 1000;
         const date = new Date(ms);
         if (isNaN(date.getTime())) return "অজানা";
 
@@ -125,7 +159,7 @@ function getCreatedTime(threadInfo) {
 // ───── MAIN RUN ─────
 module.exports.run = async function ({ api, event, args }) {
     const { threadID, messageID, senderID } = event;
-    const page = parseInt(args?.[0]) || 1;
+    const requestedPage = parseInt(args?.[0]) || 1;
 
     let threadInfo;
     try {
@@ -137,7 +171,13 @@ module.exports.run = async function ({ api, event, args }) {
         );
     }
 
-    const groupAdmins = threadInfo.adminIDs || [];
+    // ───── গ্রুপ অ্যাডমিন (UID অ্যারে, ডুপ্লিকেট মুক্ত) ─────
+    const groupAdmins = [...new Set(
+        (threadInfo.adminIDs || []).map(getUID).filter(Boolean)
+    )];
+
+    // ───── বট অ্যাডমিন (ডুপ্লিকেট মুক্ত) ─────
+    const botAdmins = getBotAdmins();
 
     // ───── PERMISSION CHECK ─────
     if (!isGroupAdmin(senderID, groupAdmins) && !isBotAdmin(senderID)) {
@@ -160,47 +200,37 @@ module.exports.run = async function ({ api, event, args }) {
         const createdTime  = getCreatedTime(threadInfo);
         const groupID      = threadID;
 
-        // ───── BOT ADMINS ─────
-        const botAdmins = global.config?.ADMINBOT || global.config?.adminBot || [];
-
-        // ───── সব UID একসাথে Fetch (দ্রুত) ─────
-        const allUIDs = [
-            ...groupAdmins.map(ad => ad.id),
-            ...botAdmins.map(String)
-        ];
-        const uniqueUIDs = [...new Set(allUIDs)];
-
-        // সব নাম একসাথে লোড
+        // ───── সব নাম একসাথে লোড (দ্রুত) ─────
+        const uniqueUIDs = [...new Set([...groupAdmins, ...botAdmins])];
         await Promise.all(uniqueUIDs.map(uid => fetchUserName(api, uid)));
 
-        // ───── GROUP ADMIN LIST ─────
-        const groupPaged = paginate(groupAdmins, page);
+        // ───── GROUP ADMIN LIST (পেজিং সহ) ─────
+        const groupPaged = paginate(groupAdmins, requestedPage);
         const groupList = groupPaged.items.length
             ? (await Promise.all(
-                groupPaged.items.map(async (ad, idx) => {
-                    const name  = await fetchUserName(api, ad.id);
-                    const isBot = isBotAdmin(ad.id);
+                groupPaged.items.map(async (uid, idx) => {
+                    const name  = await fetchUserName(api, uid);
+                    const isBot = isBotAdmin(uid);
                     const tag   = isBot ? "\n     ┗👑 বট অ্যাডমিনও" : "";
                     return (
-                        `  ${(page - 1) * 5 + idx + 1}. 👤 ${name}` +
-                        `\n     ┗🆔 ${ad.id}` +
-                        `\n     ┗🔗 fb.com/${ad.id}` +
+                        `  ${(groupPaged.current - 1) * groupPaged.perPage + idx + 1}. 👤 ${name}` +
+                        `\n     ┗🆔 ${uid}` +
+                        `\n     ┗🔗 fb.com/${uid}` +
                         tag
                     );
                 })
             )).join("\n\n")
             : "  কোনো গ্রুপ অ্যাডমিন নেই";
 
-        // ───── BOT ADMIN LIST ─────
-        const botPaged = paginate(botAdmins, page);
-        const botList = botPaged.items.length
+        // ───── BOT ADMIN LIST (সব একসাথে, পেজিং ছাড়া) ─────
+        const botList = botAdmins.length
             ? (await Promise.all(
-                botPaged.items.map(async (uid, idx) => {
-                    const name = await fetchUserName(api, String(uid));
-                    const isGA = isGroupAdmin(String(uid), groupAdmins);
+                botAdmins.map(async (uid, idx) => {
+                    const name = await fetchUserName(api, uid);
+                    const isGA = isGroupAdmin(uid, groupAdmins);
                     const tag  = isGA ? "\n     ┗🛡️ গ্রুপ অ্যাডমিনও" : "";
                     return (
-                        `  ${(page - 1) * 5 + idx + 1}. 🤖 ${name}` +
+                        `  ${idx + 1}. 🤖 ${name}` +
                         `\n     ┗🆔 ${uid}` +
                         `\n     ┗🔗 fb.com/${uid}` +
                         tag
@@ -210,33 +240,34 @@ module.exports.run = async function ({ api, event, args }) {
             : "  কোনো বট অ্যাডমিন নেই";
 
         // ───── PAGINATION INFO ─────
-        const groupPageInfo = groupAdmins.length > 5
-            ? `\n\n  📄 পেজ ${groupPaged.current}/${groupPaged.total} | পরের পেজ: listadmin ${page + 1}`
-            : "";
-        const botPageInfo = botAdmins.length > 5
-            ? `\n\n  📄 পেজ ${botPaged.current}/${botPaged.total} | পরের পেজ: listadmin ${page + 1}`
-            : "";
+        let groupPageInfo = "";
+        if (groupAdmins.length > groupPaged.perPage) {
+            groupPageInfo = `\n\n  📄 পেজ ${groupPaged.current}/${groupPaged.total}`;
+            if (groupPaged.current < groupPaged.total) {
+                groupPageInfo += ` | পরের পেজ: listadmin ${groupPaged.current + 1}`;
+            }
+        }
 
         // ───── FINAL MESSAGE ─────
         const msg = `
-╔══════════════════════╗
-║   👑 অ্যাডমিন প্যানেল v3   ║
-╚══════════════════════╝
+╔══════════════════╗
+║👑 অ্যাডমিন প্যানেল v3   ║
+╚══════════════════╝
 
 🏠 গ্রুপ   : ${groupName}
 🆔 ID      : ${groupID}
 👥 মেম্বার  : ${totalMembers} জন
 📅 তারিখ   : ${createdTime}
 
-┌──────────────────────┐
+┌──────────────────┐
   🛡️ গ্রুপ অ্যাডমিন [${groupAdmins.length} জন]
-└──────────────────────┘
+└──────────────────┘
 ${groupList}${groupPageInfo}
 
-┌──────────────────────┐
+┌──────────────────┐
   ⚙️ বট অ্যাডমিন [${botAdmins.length} জন]
-└──────────────────────┘
-${botList}${botPageInfo}
+└──────────────────┘
+${botList}
 
 🔄 রিফ্রেশ করতে 👍 রিঅ্যাক্ট করুন
 ✦ ${module.exports.config.credits}`.trim();
