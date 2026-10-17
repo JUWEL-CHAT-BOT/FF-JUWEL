@@ -1,278 +1,580 @@
 const axios = require("axios");
-const fs = require('fs');
+const fs = require("fs");
+const path = require("path");
+const { createCanvas, loadImage, registerFont } = require("canvas");
 
-// ✅ Cache, Cooldown, Stats সিস্টেম
-const cache = new Map();        // গান cache
-const cooldown = new Map();     // rate limit
-const songStats = {};           // গান স্ট্যাটস
+/* ───────────── ফন্ট (নেই থাকলে নিজে ডাউনলোড করে নেবে) ───────────── */
+const fontDir = path.join(__dirname, "fonts");
+if (!fs.existsSync(fontDir)) fs.mkdirSync(fontDir, { recursive: true });
 
-const baseApiUrl = async () => {
-  const base = await axios.get(
-    `https://raw.githubusercontent.com/Mostakim0978/D1PT0/refs/heads/main/baseApiUrl.json`
+const FONT_BASE =
+  "https://github.com/notofonts/notofonts.github.io/raw/main/fonts";
+const FONT_LIST = [
+  ["NotoSans", "Noto Sans"],
+  ["NotoSansBengali", "Noto Sans Bengali"],
+  ["NotoSansDevanagari", "Noto Sans Devanagari"],
+  ["NotoSansGurmukhi", "Noto Sans Gurmukhi"]
+];
+
+let fontsReady = null;
+function ensureFonts() {
+  if (fontsReady) return fontsReady;
+  fontsReady = (async () => {
+    for (const [name, family] of FONT_LIST) {
+      for (const [style, weight] of [["Regular", "normal"], ["Bold", "bold"]]) {
+        const file = `${name}-${style}.ttf`;
+        const fp = path.join(fontDir, file);
+        try {
+          const ok = fs.existsSync(fp) && fs.statSync(fp).size > 10000;
+          if (!ok) {
+            const { data } = await axios.get(
+              `${FONT_BASE}/${name}/hinted/ttf/${file}`,
+              { responseType: "arraybuffer", timeout: 60000 }
+            );
+            fs.writeFileSync(fp, Buffer.from(data));
+          }
+          registerFont(fp, { family, weight });
+        } catch (e) {
+          console.log(`[song] ফন্ট লোড হয়নি: ${file} → ${e.message}`);
+        }
+      }
+    }
+  })();
+  return fontsReady;
+}
+ensureFonts(); // বট চালু হওয়ার সময়ই ব্যাকগ্রাউন্ডে শুরু
+
+const FONT =
+  '"Noto Sans", "Noto Sans Bengali", "Noto Sans Devanagari", "Noto Sans Gurmukhi", sans-serif';
+
+const CREDIT = "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐";
+const COOLDOWN = 2 * 60 * 1000; // ২ মিনিট
+const SELECT_TIMEOUT = 20 * 1000; // ২০ সেকেন্ড
+const MAX_RESULTS = 5;
+const PRELOAD_COUNT = 2; // কতগুলো গান আগে থেকে রেডি করা হবে (সার্ভারে চাপ পড়লে ৩ করো)
+const cooldowns = new Map();
+
+const cacheDir = path.join(__dirname, "cache");
+if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+
+let apiCache = { url: null, time: 0 };
+const ytapi = async () => {
+  if (apiCache.url && Date.now() - apiCache.time < 5 * 60 * 1000)
+    return apiCache.url;
+  const api = await axios.get(
+    "https://gitlab.com/shahadat-sahu/sahu-api/-/raw/main/API.json",
+    { timeout: 15000 }
   );
-  return base.data.api;
+  apiCache = { url: api.data.ytapi, time: Date.now() };
+  return apiCache.url;
 };
 
 module.exports.config = {
   name: "song",
-  version: "3.0.0",
-  aliases: ["music", "play"],
-  credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
-  countDown: 5,
+  aliases: ["music", "songs", "gan"],
+  version: "2.3.0",
+  credits: CREDIT,
+  countDown: 0,
   hasPermssion: 0,
-  description: "Download audio from YouTube",
+  description: "YouTube music downloader",
   category: "media",
   commandCategory: "media",
   usePrefix: true,
-  prefix: true,
-  usages: "{pn} [<song name>|<song link>]:\n   Example:\n{pn} chipi chipi chapa chapa"
+  usages: "{pn} song name"
 };
 
-const cleanup = (path) => { try { fs.unlinkSync(path); } catch {} };
-
-// ✅ Progress মেসেজ পাঠানো
-const sendLoading = async (api, threadID) => {
-  return new Promise((resolve) => {
-    api.sendMessage("⏳ গান খোঁজা হচ্ছে, একটু অপেক্ষা করো...", threadID, (err, info) => {
-      resolve(err ? null : info.messageID);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const safeUnsend = (api, id) => {
+  if (!id) return;
+  try {
+    const p = api.unsendMessage(id);
+    if (p && p.catch) p.catch(() => {});
+  } catch (e) {}
+};
+const cleanup = files =>
+  setTimeout(() => {
+    files.forEach(f => {
+      try {
+        if (f && fs.existsSync(f)) fs.unlinkSync(f);
+      } catch (e) {}
     });
+  }, 15000);
+
+async function saveToFile(url, file, timeout = 120000) {
+  const res = await axios.get(url, { responseType: "stream", timeout });
+  await new Promise((resolve, reject) => {
+    const w = fs.createWriteStream(file);
+    const timer = setTimeout(() => {
+      res.data.destroy();
+      w.destroy();
+      reject(new Error("ফাইল ডাউনলোডে অনেক সময় লাগছে"));
+    }, timeout);
+    const fail = e => {
+      clearTimeout(timer);
+      reject(e);
+    };
+    res.data.pipe(w);
+    w.on("finish", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    w.on("error", fail);
+    res.data.on("error", fail);
   });
-};
-
-module.exports.run = async ({ api, args, event }) => {
-  if (!args[0]) {
-    return api.sendMessage(
-      "❌ একটা গানের নাম বা YouTube লিংক দাও!\n\nউদাহরণ: song chipi chipi chapa chapa",
-      event.threadID,
-      event.messageID
-    );
-  }
-
-  // ✅ Rate Limiting — ৩০ সেকেন্ডে ১টা রিকোয়েস্ট
-  const userID = event.senderID;
-  if (cooldown.has(userID)) {
-    const timeLeft = Math.ceil((cooldown.get(userID) - Date.now()) / 1000);
-    return api.sendMessage(
-      `⏳ একটু অপেক্ষা করো! আরো ${timeLeft} সেকেন্ড পরে আবার চেষ্টা করো।`,
-      event.threadID,
-      event.messageID
-    );
-  }
-  cooldown.set(userID, Date.now() + 30000);
-  setTimeout(() => cooldown.delete(userID), 30000);
-
-  const base = await baseApiUrl();
-  const checkurl = /^(?:https?:\/\/)?(?:m\.|www\.)?(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))((\w|-){11})(?:\S+)?$/;
-
-  // ✅ সরাসরি YouTube লিংক
-  if (checkurl.test(args[0])) {
-    const match = args[0].match(checkurl);
-    const videoID = match?.[1];
-    if (!videoID) {
-      return api.sendMessage("❌ ভুল YouTube লিংক!", event.threadID, event.messageID);
-    }
-
-    // ✅ Loading মেসেজ
-    const loadingID = await sendLoading(api, event.threadID);
-
-    try {
-      let downloadLink, title;
-
-      // ✅ Cache চেক
-      if (cache.has(videoID)) {
-        ({ downloadLink, title } = cache.get(videoID));
-      } else {
-        const res = await axios.get(`${base}/ytDl3?link=${videoID}&format=mp3`);
-        title = res.data.title;
-        downloadLink = res.data.downloadLink;
-
-        // ✅ ফাইল সাইজ চেক
-        const { headers } = await axios.head(downloadLink);
-        const sizeMB = parseInt(headers['content-length'] || 0) / (1024 * 1024);
-        if (sizeMB > 25) {
-          if (loadingID) await api.unsendMessage(loadingID);
-          return api.sendMessage(
-            `❌ ফাইল সাইজ ${sizeMB.toFixed(1)}MB — ২৫MB এর বেশি পাঠানো যাবে না!`,
-            event.threadID,
-            event.messageID
-          );
-        }
-
-        cache.set(videoID, { downloadLink, title });
-        setTimeout(() => cache.delete(videoID), 10 * 60 * 1000); // ১০ মিনিট পর cache মুছবে
-      }
-
-      // ✅ স্ট্যাটস আপডেট
-      songStats[title] = (songStats[title] || 0) + 1;
-
-      // ✅ Loading মেসেজ মুছো
-      if (loadingID) await api.unsendMessage(loadingID);
-
-      return api.sendMessage(
-        { body: `🎵 ${title}`, attachment: await dipto(downloadLink, `audio_${userID}.mp3`) },
-        event.threadID,
-        () => cleanup(`audio_${userID}.mp3`),
-        event.messageID
-      );
-
-    } catch (err) {
-      if (loadingID) await api.unsendMessage(loadingID);
-      return api.sendMessage("❌ ডাউনলোড করতে সমস্যা হয়েছে!", event.threadID, event.messageID);
-    }
-  }
-
-  // ✅ গানের নাম দিয়ে search
-  let keyWord = args.join(" ").replace("?feature=share", "");
-  const maxResults = 6;
-  let result;
-
-  // ✅ Loading মেসেজ
-  const loadingID = await sendLoading(api, event.threadID);
-
-  try {
-    result = ((await axios.get(`${base}/ytFullSearch?songName=${keyWord}`)).data).slice(0, maxResults);
-  } catch (err) {
-    if (loadingID) await api.unsendMessage(loadingID);
-    return api.sendMessage("❌ Error: " + err.message, event.threadID, event.messageID);
-  }
-
-  if (!result || result.length === 0) {
-    if (loadingID) await api.unsendMessage(loadingID);
-    return api.sendMessage(
-      `⭕ "${keyWord}" এর জন্য কোনো রেজাল্ট পাওয়া যায়নি।`,
-      event.threadID,
-      event.messageID
-    );
-  }
-
-  // ✅ সুন্দর ফরম্যাটেড মেসেজ (ফিচার ৮)
-  let msg = "🎵 গান বেছে নাও:\n";
-  msg += "━━━━━━━━━━━━━━━\n\n";
-  const thumbnails = [];
-
-  for (let i = 0; i < result.length; i++) {
-    const info = result[i];
-    thumbnails.push(diptoSt(info.thumbnail, `photo_${i}_${userID}.jpg`));
-    msg += `${i + 1}. 🎵 ${info.title}\n`;
-    msg += `   ⏱ ${info.time}  |  📺 ${info.channel.name}\n\n`;
-  }
-
-  msg += "━━━━━━━━━━━━━━━\n";
-  msg += "👆 নম্বর দিয়ে রিপ্লাই করো";
-
-  // ✅ Loading মেসেজ মুছো
-  if (loadingID) await api.unsendMessage(loadingID);
-
-  api.sendMessage(
-    { body: msg, attachment: await Promise.all(thumbnails) },
-    event.threadID,
-    (err, info) => {
-      if (err) return;
-      global.client.handleReply.push({
-        name: "song",
-        messageID: info.messageID,
-        author: event.senderID,
-        result
-      });
-    },
-    event.messageID
-  );
-};
-
-module.exports.handleReply = async ({ event, api, handleReply }) => {
-  try {
-    const { result } = handleReply;
-
-    // ✅ শুধু যে পাঠিয়েছে সে রিপ্লাই করতে পারবে
-    if (event.senderID !== handleReply.author) {
-      return api.sendMessage(
-        "❌ এই লিস্টটা তোমার না, নিজে সার্চ করো!",
-        event.threadID,
-        event.messageID
-      );
-    }
-
-    const choice = parseInt(event.body);
-    if (isNaN(choice) || choice < 1 || choice > result.length) {
-      return api.sendMessage(
-        `❌ ১ থেকে ${result.length} এর মধ্যে নম্বর দাও।`,
-        event.threadID,
-        event.messageID
-      );
-    }
-
-    const userID = event.senderID;
-    const infoChoice = result[choice - 1];
-    const videoID = infoChoice.id;
-
-    // ✅ Loading মেসেজ
-    const loadingID = await sendLoading(api, event.threadID);
-
-    const base = await baseApiUrl();
-    let downloadLink, title, quality;
-
-    // ✅ Cache চেক
-    if (cache.has(videoID)) {
-      ({ downloadLink, title, quality } = cache.get(videoID));
-    } else {
-      const res = await axios.get(`${base}/ytDl3?link=${videoID}&format=mp3`);
-      title = res.data.title;
-      downloadLink = res.data.downloadLink;
-      quality = res.data.quality;
-
-      // ✅ ফাইল সাইজ চেক
-      const { headers } = await axios.head(downloadLink);
-      const sizeMB = parseInt(headers['content-length'] || 0) / (1024 * 1024);
-      if (sizeMB > 25) {
-        if (loadingID) await api.unsendMessage(loadingID);
-        return api.sendMessage(
-          `❌ ফাইল সাইজ ${sizeMB.toFixed(1)}MB — ২৫MB এর বেশি পাঠানো যাবে না!`,
-          event.threadID,
-          event.messageID
-        );
-      }
-
-      cache.set(videoID, { downloadLink, title, quality });
-      setTimeout(() => cache.delete(videoID), 10 * 60 * 1000);
-    }
-
-    // ✅ স্ট্যাটস আপডেট
-    songStats[title] = (songStats[title] || 0) + 1;
-
-    await api.unsendMessage(handleReply.messageID);
-    if (loadingID) await api.unsendMessage(loadingID);
-
-    // ✅ সুন্দর ফরম্যাটেড রেসপন্স (ফিচার ৮)
-    await api.sendMessage(
-      {
-        body: `🎵 ${title}\n━━━━━━━━━━━━━━━\n📊 Quality: ${quality}\n🔥 মোট ${songStats[title]} বার শোনা হয়েছে`,
-        attachment: await dipto(downloadLink, `audio_${userID}.mp3`)
-      },
-      event.threadID,
-      () => cleanup(`audio_${userID}.mp3`),
-      event.messageID
-    );
-
-  } catch (error) {
-    console.error(error);
-    api.sendMessage(
-      "⭕ সমস্যা হয়েছে, হয়তো ফাইল সাইজ ২৫MB এর বেশি।",
-      event.threadID,
-      event.messageID
-    );
-  }
-};
-
-// ✅ MP3 ডাউনলোড
-async function dipto(url, pathName) {
-  const response = await axios.get(url, { responseType: "arraybuffer" });
-  fs.writeFileSync(pathName, Buffer.from(response.data));
-  return fs.createReadStream(pathName);
 }
 
-// ✅ Thumbnail ডাউনলোড
-async function diptoSt(url, pathName) {
-  const response = await axios.get(url, { responseType: "stream" });
-  response.data.path = pathName;
-  return response.data;
-                                }
+function getThumb(song) {
+  const id = song.videoId || song.id;
+  return (
+    song.thumbnail ||
+    song.thumbnails?.[0]?.url ||
+    song.thumb ||
+    (id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null)
+  );
+}
+
+function formatLeft(ms) {
+  const s = Math.ceil(ms / 1000);
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return m > 0 ? `${m} মিনিট ${sec} সেকেন্ড` : `${sec} সেকেন্ড`;
+}
+
+/* ───────────── গানের সময় ফরম্যাট ───────────── */
+function formatDuration(d) {
+  if (d === undefined || d === null || d === "") return "N/A";
+
+  if (typeof d === "object") {
+    d = d.timestamp || d.text || d.seconds || d.duration || null;
+    if (d === null) return "N/A";
+  }
+
+  // সেকেন্ড হিসেবে সংখ্যা এলে (যেমন 215)
+  if (typeof d === "number" || /^\d+(\.\d+)?$/.test(String(d).trim())) {
+    const total = Math.floor(Number(d));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    const pad = n => String(n).padStart(2, "0");
+    return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+  }
+
+  // আগে থেকেই "3:45" ফরম্যাটে থাকলে
+  return String(d);
+}
+
+/* ───────────── ভিউ ফরম্যাট ───────────── */
+const formatViews = v => {
+  if (v === undefined || v === null || v === "") return "";
+  if (typeof v === "string" && /[a-zA-Z]/.test(v)) return v; // আগে থেকেই "51M views" হলে
+  const n = Number(String(v).replace(/[^\d.]/g, ""));
+  if (!n) return "";
+  let out;
+  if (n >= 1e9) out = (n / 1e9).toFixed(1).replace(".0", "") + "B";
+  else if (n >= 1e6) out = Math.round(n / 1e6) + "M";
+  else if (n >= 1e3) out = Math.round(n / 1e3) + "K";
+  else out = String(n);
+  return out + " views";
+};
+
+/* ───────────── ক্যানভাস হেল্পার ───────────── */
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function wrapText(ctx, text, maxW, maxLines) {
+  const words = String(text).split(" ");
+  const lines = [];
+  let line = "";
+  for (let i = 0; i < words.length; i++) {
+    const test = line ? line + " " + words[i] : words[i];
+    if (ctx.measureText(test).width > maxW && line) {
+      lines.push(line);
+      line = words[i];
+      if (lines.length === maxLines - 1) {
+        line = words.slice(i).join(" ");
+        break;
+      }
+    } else line = test;
+  }
+  lines.push(line);
+
+  // শেষ লাইন বেশি লম্বা হলে ... দিয়ে কাটা
+  let last = lines[lines.length - 1];
+  if (ctx.measureText(last).width > maxW) {
+    while (last.length > 1 && ctx.measureText(last + "…").width > maxW)
+      last = last.slice(0, -1);
+    lines[lines.length - 1] = last + "…";
+  }
+  return lines.slice(0, maxLines);
+}
+
+/* ───────────── ৫টা গানের লিস্ট একটা ছবিতে ───────────── */
+async function makeListImage(songs, outFile) {
+  await ensureFonts();
+  const W = 720,
+    ROW = 168,
+    PAD = 12;
+  const canvas = createCanvas(W, ROW * songs.length + PAD);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#0f0f0f";
+  ctx.fillRect(0, 0, W, canvas.height);
+
+  for (let i = 0; i < songs.length; i++) {
+    const s = songs[i];
+    const y = PAD + i * ROW + 6;
+    const tx = 50,
+      tw = 248,
+      th = 140;
+
+    // নম্বর
+    ctx.fillStyle = "#aaaaaa";
+    ctx.font = `bold 22px ${FONT}`;
+    ctx.textAlign = "center";
+    ctx.fillText(String(i + 1), 24, y + th / 2 + 8);
+    ctx.textAlign = "left";
+
+    // থাম্বনেইল
+    try {
+      const url = getThumb(s);
+      const { data } = await axios.get(url, {
+        responseType: "arraybuffer",
+        timeout: 5000
+      });
+      const img = await loadImage(Buffer.from(data));
+      ctx.save();
+      roundRect(ctx, tx, y, tw, th, 12);
+      ctx.clip();
+      const scale = Math.max(tw / img.width, th / img.height);
+      const dw = img.width * scale,
+        dh = img.height * scale;
+      ctx.drawImage(img, tx + (tw - dw) / 2, y + (th - dh) / 2, dw, dh);
+      ctx.restore();
+    } catch (e) {
+      ctx.fillStyle = "#272727";
+      roundRect(ctx, tx, y, tw, th, 12);
+      ctx.fill();
+    }
+
+    // সময়ের ব্যাজ
+    const dur = formatDuration(s.duration ?? s.timestamp ?? s.duration_seconds);
+    ctx.font = `bold 16px ${FONT}`;
+    const bw = ctx.measureText(dur).width + 14;
+    ctx.fillStyle = "rgba(0,0,0,0.8)";
+    roundRect(ctx, tx + tw - bw - 8, y + th - 30, bw, 22, 6);
+    ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(dur, tx + tw - bw - 1, y + th - 13);
+
+    // টাইটেল (২ লাইন)
+    const x2 = tx + tw + 20;
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `bold 20px ${FONT}`;
+    const lines = wrapText(ctx, s.title || "Unknown", W - x2 - 20, 2);
+    lines.forEach((l, k) => ctx.fillText(l, x2, y + 26 + k * 25));
+
+    // চ্যানেল
+    const ch = s.channel?.name || s.channel || s.author?.name || "Unknown";
+    ctx.fillStyle = "#aaaaaa";
+    ctx.font = `bold 17px ${FONT}`;
+    ctx.fillText(String(ch).slice(0, 28), x2, y + 92);
+
+    // ভিউ • কতদিন আগে
+    const views = formatViews(s.views ?? s.view_count ?? s.viewCount);
+    const ago = s.published || s.ago || s.uploaded || s.uploadedAt || "";
+    const meta = [views, ago].filter(Boolean).join(" • ");
+    ctx.font = `16px ${FONT}`;
+    ctx.fillText(meta, x2, y + 118);
+  }
+
+  fs.writeFileSync(outFile, canvas.toBuffer("image/png"));
+}
+
+/* ───────────── জব তৈরি + অপেক্ষা (প্রিলোডেও ব্যবহার হয়) ───────────── */
+async function createJob(song) {
+  const API = await ytapi();
+
+  const { data: job } = await axios.post(
+    `${API}/api/download`,
+    { url: song.url, format: "mp3" },
+    { timeout: 30000 }
+  );
+  const jobId = job?.job_id || job?.id;
+  if (!jobId) {
+    console.log("[song] job রেসপন্স:", JSON.stringify(job).slice(0, 300));
+    throw new Error("ডাউনলোড জব তৈরি হয়নি");
+  }
+
+  const deadline = Date.now() + 3 * 60 * 1000; // সর্বোচ্চ ৩ মিনিট
+  let i = 0;
+  while (Date.now() < deadline) {
+    const { data: status } = await axios.get(`${API}/api/jobs/${jobId}`, {
+      timeout: 15000
+    });
+    const st = String(status.status || "").toLowerCase();
+
+    if (st === "failed" || st === "error") {
+      console.log("[song] job failed:", JSON.stringify(status).slice(0, 300));
+      throw new Error("এই গানটি ডাউনলোড করা যায়নি");
+    }
+
+    const fileUrl = status.file_url || status.download_url || status.url;
+    if (
+      ["completed", "done", "success", "finished"].includes(st) &&
+      fileUrl
+    )
+      return { API, result: { ...status, file_url: fileUrl } };
+
+    await sleep(i++ < 10 ? 300 : 700);
+  }
+  console.log("[song] job timeout:", song.url);
+  throw new Error("সার্ভার থেকে গান আসতে অনেক দেরি হচ্ছে");
+}
+
+/* ───────────── গান ডাউনলোড ───────────── */
+async function downloadSong(api, event, song, prefetched) {
+  let data = null;
+  if (prefetched) {
+    try {
+      // প্রিলোড ৬০ সেকেন্ডের বেশি আটকে থাকলে নতুন করে চেষ্টা
+      data = await Promise.race([
+        prefetched,
+        new Promise((_, rej) =>
+          setTimeout(() => rej(new Error("prefetch timeout")), 60000)
+        )
+      ]);
+    } catch (e) {
+      console.log("[song] প্রিলোড ফেল:", e.message);
+      data = null;
+    }
+  }
+  if (!data) data = await createJob(song);
+
+  const { API, result } = data;
+  const url = result.file_url.startsWith("/")
+    ? `${API}${result.file_url}`
+    : result.file_url;
+
+  const file = path.join(cacheDir, `song_${Date.now()}_${event.senderID}.mp3`);
+  await saveToFile(url, file, 120000);
+  if (!fs.existsSync(file) || fs.statSync(file).size < 1000)
+    throw new Error("ফাইল ঠিকমতো ডাউনলোড হয়নি");
+
+  return {
+    file,
+    title: result.title || song.title || "Unknown",
+    duration: result.duration
+  };
+}
+
+/* ───────────── কমান্ড রান ───────────── */
+module.exports.run = async ({ api, event, args }) => {
+  const { threadID, messageID, senderID } = event;
+
+  if (!args.length)
+    return api.sendMessage(
+      "🎵 গানের নাম লিখুন!\n\n📌 উদাহরণ: song tum hi ho",
+      threadID,
+      messageID
+    );
+
+  const last = cooldowns.get(senderID);
+  if (last && Date.now() - last < COOLDOWN) {
+    const left = COOLDOWN - (Date.now() - last);
+    return api.sendMessage(
+      `⏳ একটু অপেক্ষা করুন!\n\nআবার কমান্ড দিতে পারবেন: ${formatLeft(left)} পর`,
+      threadID,
+      messageID
+    );
+  }
+  cooldowns.set(senderID, Date.now());
+
+  const query = args.join(" ");
+
+  const searchMsg = await api.sendMessage(
+    `🔎 ইউটিউব থেকে তোমার গান সার্চ করা হচ্ছে...\n\n🎶 "${query}"\n⏳ একটু অপেক্ষা করো`,
+    threadID,
+    messageID
+  );
+
+  const thumbFiles = [];
+  try {
+    const API = await ytapi();
+    const { data } = await axios.get(`${API}/api/search`, {
+      params: { q: query, limit: 15 },
+      timeout: 30000
+    });
+
+    const seen = new Set();
+    const songs = (data.results || [])
+      .filter(s => {
+        const id = s.videoId || s.id || s.url;
+        if (!id || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      })
+      .slice(0, MAX_RESULTS);
+
+    if (!songs.length) throw new Error("কোনো গান পাওয়া যায়নি");
+
+    // সার্চ রেজাল্ট পাওয়ার সাথেই ব্যাকগ্রাউন্ডে জব শুরু (ছবি বানানোর সাথে একসাথে চলবে)
+    const jobs = songs.map((s, i) => {
+      if (i >= PRELOAD_COUNT) return null;
+      const p = createJob(s);
+      p.catch(() => {}); // এরর হলে ক্র্যাশ যেন না করে
+      return p;
+    });
+
+    // ৫টা গানের লিস্ট একটা ছবিতে
+    const stamp = Date.now();
+    const listImg = path.join(cacheDir, `list_${stamp}_${senderID}.png`);
+    await makeListImage(songs, listImg);
+    thumbFiles.push(listImg);
+
+    const body = `🎵 "${query}" এর রেজাল্ট
+
+📩 গান পেতে এই মেসেজে রিপ্লাই করে
+🔢 1-${songs.length} নম্বর লিখুন
+⏰ ২০ সেকেন্ডের মধ্যে সিলেক্ট করুন
+━━━━━━━━━━━━━━━━━━
+👑 ${CREDIT}`;
+
+    const msg = { body, attachment: fs.createReadStream(listImg) };
+
+    api.sendMessage(msg, threadID, (err, info) => {
+      safeUnsend(api, searchMsg?.messageID);
+      cleanup(thumbFiles);
+      if (err || !info) return;
+
+      const entry = {
+        name: "song",
+        messageID: info.messageID,
+        author: senderID,
+        results: songs,
+        jobs,
+        busy: false
+      };
+      global.client.handleReply.push(entry);
+
+      // ২০ সেকেন্ডে সিলেক্ট না করলে লিস্ট ডিলিট
+      setTimeout(() => {
+        const list = global.client.handleReply;
+        const idx = list.findIndex(h => h.messageID === info.messageID);
+        if (idx === -1) return; // আগেই সিলেক্ট হয়ে গেছে
+        if (entry.busy) return; // ডাউনলোড চলছে, ডিলিট করা যাবে না
+        list.splice(idx, 1);
+        safeUnsend(api, info.messageID);
+      }, SELECT_TIMEOUT);
+    });
+  } catch (error) {
+    safeUnsend(api, searchMsg?.messageID);
+    cleanup(thumbFiles);
+    cooldowns.delete(senderID);
+    return api.sendMessage(
+      `⚠️ সার্চ ব্যর্থ হয়েছে\n${
+        error.response?.data?.error?.message || error.message
+      }`,
+      threadID,
+      messageID
+    );
+  }
+};
+
+/* ───────────── নম্বর রিপ্লাই ───────────── */
+module.exports.handleReply = async ({ api, event, handleReply }) => {
+  const { threadID, messageID, senderID } = event;
+
+  const choice = parseInt(String(event.body || "").trim(), 10);
+
+  // অন্য কেউ রিপ্লাই করলে নোটিশ
+  if (senderID !== handleReply.author) {
+    if (!isNaN(choice))
+      return api.sendMessage(
+        `🚫 এটা তোমার কমান্ড না!\n\n⚠️ শুধু যে কমান্ড দিয়েছে সে-ই গান সিলেক্ট করতে পারবে।\n🎵 নিজে গান পেতে নিজে কমান্ড দাও।`,
+        threadID,
+        messageID
+      );
+    return;
+  }
+
+  if (isNaN(choice) || choice < 1 || choice > handleReply.results.length)
+    return api.sendMessage(
+      `❌ ভুল নম্বর! 1 থেকে ${handleReply.results.length} এর মধ্যে লিখুন।`,
+      threadID,
+      messageID
+    );
+
+  if (handleReply.busy) return;
+  handleReply.busy = true;
+
+  const song = handleReply.results[choice - 1];
+  const waitMsg = await api.sendMessage(
+    `⏳ গান আনা হচ্ছে...\n\n🎼 ${song.title || "Unknown"}\n🚀 একটু অপেক্ষা করুন`,
+    threadID,
+    messageID
+  );
+
+  let file;
+  try {
+    const res = await downloadSong(
+      api,
+      event,
+      song,
+      handleReply.jobs?.[choice - 1]
+    );
+    file = res.file;
+
+    const dur = formatDuration(
+      song.duration ?? song.timestamp ?? song.duration_seconds ?? res.duration
+    );
+
+    const body = `╭━━━━━━━━━━━━━━━━━━╮
+   ${CREDIT}
+╰━━━━━━━━━━━━━━━━━━╯
+🎼 ${res.title}
+👤 ${song.channel?.name || song.channel || song.author?.name || "Unknown"}
+⏱️ সময়: ${dur}
+🎚️ MP3 • 192kbps
+━━━━━━━━━━━━━━━━━━
+👑 ${CREDIT}`;
+
+    api.sendMessage(
+      { body, attachment: fs.createReadStream(file) },
+      threadID,
+      err => {
+        safeUnsend(api, waitMsg?.messageID);
+        cleanup([file]);
+        if (err) {
+          console.log("[song] পাঠাতে সমস্যা:", err);
+          handleReply.busy = false;
+          return api.sendMessage(
+            `❌ গান পাঠানো যায়নি\n\n${
+              err.message || err.error || "অজানা সমস্যা"
+            }\n\n🔁 আবার নম্বর দিয়ে রিপ্লাই করুন।`,
+            threadID
+          );
+        }
+        safeUnsend(api, handleReply.messageID);
+        const list = global.client.handleReply;
+        const idx = list.findIndex(h => h.messageID === handleReply.messageID);
+        if (idx !== -1) list.splice(idx, 1);
+      }
+    );
+  } catch (error) {
+    console.log("[song] ডাউনলোড এরর:", error.message);
+    handleReply.busy = false;
+    safeUnsend(api, waitMsg?.messageID);
+    cleanup([file]);
+    return api.sendMessage(
+      `❌ ডাউনলোড ব্যর্থ\n\n${error.message}\n\n🔁 অন্য একটি নম্বর দিয়ে রিপ্লাই করুন।`,
+      threadID,
+      messageID
+    );
+  }
+};
