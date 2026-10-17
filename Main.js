@@ -12,8 +12,8 @@ const logName = "𝗠𝗥 𝗝𝗨𝗪𝗘𝗟";
 const logNickName = "𝗝𝗨𝗪𝗘𝗟 𝗖𝗛𝗔𝗧 𝗕𝗢𝗧";
 const logAnthorName = "𝗠𝗥 𝗝𝗨𝗪𝗘𝗟";
 // ⚠️ এই দুটি আইডি ডিফল্টভাবে ডেভেলপার পারমিশন পায়। নিজের আইডি দিন বা মুছে দিন।
-const anthorUid = "100004225532317";
-const anthorId = "100044713412032";
+const anthorUid = "61594400795920";
+const anthorId = "61595409844497";
 const logconsoleName = "𝗠𝗘𝗦𝗦𝗘𝗡𝗚𝗘𝗥 𝗖𝗛𝗔𝗧 𝗕𝗢𝗧";
 
 const logger = require("./utils/log")(logName, logNickName);
@@ -35,7 +35,7 @@ const BOT_ART = chalk[selectedColor](`
 ░╚════╝░░╚═════╝░░░░╚═╝░░░╚═╝░░╚══════╝╚══════╝
 `);
 
-const TZ = "Asia/Kolkata"; // আপনার টাইমজোন অনুযায়ী বদলাতে পারেন (যেমন Asia/Dhaka)
+const TZ = "Asia/Dhaka"; // বাংলাদেশের সময়
 
 // ---------------- global.client ----------------
 global.client = {
