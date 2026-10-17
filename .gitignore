@@ -22,3 +22,7 @@ npm-debug.log*
 Thumbs.db
 .idea/
 .vscode/
+
+status.json
+status.json.tmp
+logs/
