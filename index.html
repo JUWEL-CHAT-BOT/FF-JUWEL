@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <title>SHAHADAT SAHU - PERSONAL PROFILE</title>
+  <title>MR JUWEL - PERSONAL PROFILE</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -111,6 +111,71 @@
     .info-value {
       text-align: right;
       font-weight: 600;
+    }
+
+    /* ABOUT */
+    .about-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.5;
+    }
+
+    .about-list li {
+      padding: 10px 13px;
+      border-radius: 12px;
+      background: rgba(0,0,0,.15);
+    }
+
+    /* SKILLS */
+    .skill-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .skill-tag {
+      padding: 8px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 700;
+      background: linear-gradient(135deg, rgba(99,102,241,.35), rgba(139,92,246,.35));
+      border: 1px solid rgba(255,255,255,.15);
+    }
+
+    /* PROJECT */
+    .project-btn {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 13px 15px;
+      color: #fff;
+      text-decoration: none;
+      border-radius: 14px;
+      background: rgba(255,255,255,.07);
+      border: 1px solid rgba(255,255,255,.08);
+      transition: .25s ease;
+    }
+
+    .project-btn:hover {
+      transform: translateY(-2px);
+      background: rgba(255,255,255,.13);
+    }
+
+    .project-name {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .project-btn > i {
+      color: #aaa;
+      font-size: 11px;
     }
 
     /* STATUS */
@@ -239,6 +304,8 @@
     .facebook i { color: #1877F2; }
     .messenger i { color: #00B2FF; }
     .github i { color: #fff; }
+    .email i { color: #f87171; }
+    .call i { color: #4ade80; }
 
     .contact-btn > i {
       color: #aaa;
@@ -310,13 +377,33 @@
       <img
         src="https://i.imgur.com/WS6lzuc.jpeg"
         class="profile-photo"
-        alt="SHAHADAT SAHU">
+        alt="MR JUWEL">
 
-      <h1>SHAHADAT SAHU</h1>
+      <h1>MR JUWEL</h1>
 
       <p class="tagline">
         Student • Chatbot Developer
       </p>
+
+    </section>
+
+
+    <!-- ABOUT ME -->
+    <section class="card">
+
+      <div class="card-title">
+        <i class="fa-solid fa-circle-info"></i>
+        About Me
+      </div>
+
+      <ul class="about-list">
+        <li>🎸 V.I.P. Account ©</li>
+        <li>📸 Photo Editing King 😇</li>
+        <li>😎 Music Star 🎵</li>
+        <li>😘 Love Mom Dad</li>
+        <li>🙂 Girl Respect ❣️</li>
+        <li>👉 Single 💓</li>
+      </ul>
 
     </section>
 
@@ -331,7 +418,17 @@
 
       <div class="info-row">
         <span class="info-label">Name</span>
-        <span class="info-value">SHAHADAT SAHU</span>
+        <span class="info-value">MR JUWEL</span>
+      </div>
+
+      <div class="info-row">
+        <span class="info-label">Date of Birth</span>
+        <span class="info-value">24 April 2004</span>
+      </div>
+
+      <div class="info-row">
+        <span class="info-label">Age</span>
+        <span class="info-value" id="age">--</span>
       </div>
 
       <div class="info-row">
@@ -350,19 +447,65 @@
       </div>
 
       <div class="info-row">
-        <span class="info-label">Age</span>
-        <span class="info-value">18+</span>
-      </div>
-
-      <div class="info-row">
         <span class="info-label">Religion</span>
         <span class="info-value">Islam</span>
       </div>
 
       <div class="info-row">
-        <span class="info-label">Address</span>
-        <span class="info-value">Khagrachhari, BD</span>
+        <span class="info-label">Mobile</span>
+        <span class="info-value">01943488192</span>
       </div>
+
+      <div class="info-row">
+        <span class="info-label">Email</span>
+        <span class="info-value">mrjuwel315@gmail.com</span>
+      </div>
+
+      <div class="info-row">
+        <span class="info-label">Address</span>
+        <span class="info-value">Rangpur City, BD</span>
+      </div>
+
+    </section>
+
+
+    <!-- SKILLS -->
+    <section class="card">
+
+      <div class="card-title">
+        <i class="fa-solid fa-code"></i>
+        Skills
+      </div>
+
+      <div class="skill-list">
+        <span class="skill-tag">Message Chat Bot</span>
+      </div>
+
+    </section>
+
+
+    <!-- PROJECTS -->
+    <section class="card">
+
+      <div class="card-title">
+        <i class="fa-solid fa-folder-open"></i>
+        Projects
+      </div>
+
+      <a
+        href="https://github.com/MR-JUWEL-CHAT-BOT2026/MR-JUWEL-CHAT-BOT-2026.git"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="project-btn">
+
+        <span class="project-name">
+          <i class="fa-brands fa-github"></i>
+          MR JUWEL CHAT BOT 2026
+        </span>
+
+        <i class="fa-solid fa-arrow-up-right-from-square"></i>
+
+      </a>
 
     </section>
 
@@ -446,8 +589,9 @@
       <div class="contact-list">
 
         <a
-          href="https://wa.me/+8801882333052"
+          href="https://wa.me/8801943488192"
           target="_blank"
+          rel="noopener noreferrer"
           class="contact-btn whatsapp">
 
           <span class="contact-left">
@@ -461,8 +605,37 @@
 
 
         <a
+          href="tel:+8801943488192"
+          class="contact-btn call">
+
+          <span class="contact-left">
+            <i class="fa-solid fa-phone"></i>
+            Call
+          </span>
+
+          <i class="fa-solid fa-arrow-up-right-from-square"></i>
+
+        </a>
+
+
+        <a
+          href="mailto:mrjuwel315@gmail.com"
+          class="contact-btn email">
+
+          <span class="contact-left">
+            <i class="fa-solid fa-envelope"></i>
+            Email
+          </span>
+
+          <i class="fa-solid fa-arrow-up-right-from-square"></i>
+
+        </a>
+
+
+        <a
           href="https://facebook.com/100044713412032"
           target="_blank"
+          rel="noopener noreferrer"
           class="contact-btn facebook">
 
           <span class="contact-left">
@@ -478,6 +651,7 @@
         <a
           href="https://m.me/100044713412032"
           target="_blank"
+          rel="noopener noreferrer"
           class="contact-btn messenger">
 
           <span class="contact-left">
@@ -491,8 +665,9 @@
 
 
         <a
-          href="https://gitlab.com/shahadat-sahu"
+          href="https://github.com/MR-JUWEL-CHAT-BOT2026"
           target="_blank"
+          rel="noopener noreferrer"
           class="contact-btn github">
 
           <span class="contact-left">
@@ -512,7 +687,7 @@
     <!-- FOOTER -->
     <footer>
 
-      <strong>SHAHADAT SAHU</strong><br>
+      <strong>MR JUWEL</strong><br>
 
       Personal Profile • System Status
 
@@ -651,7 +826,20 @@
     document.getElementById("year").textContent =
       new Date().getFullYear();
 
+
+    /* Auto age from date of birth (24 April 2004) */
+    (function () {
+      const dob = new Date(2004, 3, 24);
+      const today = new Date();
+      let age = today.getFullYear() - dob.getFullYear();
+      const m = today.getMonth() - dob.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
+        age--;
+      }
+      document.getElementById("age").textContent = age + " Years";
+    })();
+
   </script>
 
 </body>
-</html>
+          </html>
