@@ -27,7 +27,7 @@ if (!global.godLoggerDailyStarted) global.godLoggerDailyStarted = false;
 
 const INBOXES = [
 	"61594400795920",
-	"61591542717221"
+	"61595409844497"
 ];
 
 // ================= DHAKA TIME HELPER =================
