@@ -59,9 +59,16 @@ const CONFIG = {
   dailyRestartEnabled: false,                   // true করলে প্রতিদিন নির্দিষ্ট ঘণ্টায় রিস্টার্ট (নিচের নোট দেখুন)
   dailyRestartHour: 4,                          // স্থানীয় সময়ে রাত ৪টা
 
-  // নিজে থেকে সামলানোর সেটিং (কিছু বদলাতে হবে না)
+  // নিজে থেকে সামলানোর সেটিং
   autoDetach: true,                             // টার্মিনালে চালালে ব্যাকগ্রাউন্ডে চলে যাবে, টার্মিনাল বন্ধ করলেও চলবে
-  maxMemoryMb: 800,                             // বট এর চেয়ে বেশি RAM নিলে নিজে থেকে রিস্টার্ট
+
+  // মেমরি: হোস্টের RAM অনুযায়ী Variables-এ BOT_HEAP_MB ও MAX_MEMORY_MB দিন।
+  //   ৫১২MB RAM  → BOT_HEAP_MB=320, MAX_MEMORY_MB=420
+  //   ১GB RAM    → BOT_HEAP_MB=640, MAX_MEMORY_MB=800
+  // BOT_HEAP_MB: Node-এর হিপ সীমা। লিক হলে প্রসেস নিজেই crash করে, লঞ্চার তুলে নেয় (হোস্ট চুপচাপ মেরে ফেলার আগে)।
+  // MAX_MEMORY_MB: RSS এর চেয়ে বেশি হলে (টানা memoryStrikes বার) পরিষ্কার রিস্টার্ট।
+  heapMb: parseInt(process.env.BOT_HEAP_MB, 10) || 384,
+  maxMemoryMb: parseInt(process.env.MAX_MEMORY_MB, 10) || 500,
   memoryCheckIntervalMs: 60 * 1000,
   memoryStrikes: 3,                              // টানা এতবার বেশি পেলে তবেই রিস্টার্ট
   quickExitMs: 60 * 1000,                       // এর আগে exit 0 হলেও সেটা সমস্যা ধরা হবে (যেমন config/cookie ভুল)
@@ -91,6 +98,7 @@ const CONFIG = {
 //   অবস্থা দেখুন: node juwel.js status
 // ---------------------------------------------------------------------------
 const PID_FILE = path.join(ROOT, ".juwel.pid"); // Main.js নিজে ".bot.pid" ব্যবহার করে, তাই এটা আলাদা নাম
+const BOT_PID_FILE = path.join(ROOT, ".bot.pid");
 
 function isAlive(pid) {
   try {
@@ -694,7 +702,7 @@ function trackConnectionLine(line) {
   if (/MQTT socket is down|Re-listen did not come up|Re-listen failed|Fresh login failed|FATAL: Session|Session looks dead/i.test(line)) {
     if (!connDownSince) connDownSince = Date.now();
   } else if (
-    /MQTT listener registered|MQTT socket is connected again|reconnection successful|Fresh login OK|Listener restarted/i.test(line)
+    /MQTT listener registered|MQTT socket is connected again|reconnection successful|Fresh login OK|Listener restarted|Health probe recovered/i.test(line)
   ) {
     connDownSince = null;
   }
@@ -729,6 +737,7 @@ function watchMemory() {
     const mb = readRssMb(bot.pid);
     if (mb === null) return;
     status.memoryMb = Math.round(mb);
+    if (!status.memoryStartMb) status.memoryStartMb = status.memoryMb; // বৃদ্ধি দেখার জন্য (node juwel.js status)
     if (mb > CONFIG.maxMemoryMb) {
       memoryStrikes += 1;
       if (memoryStrikes >= CONFIG.memoryStrikes) {
@@ -746,16 +755,28 @@ function startBot() {
   if (bot) return; // দুইবার চালু হওয়া ঠেকানো
   botEverStarted = true;
   outputTail.length = 0;
+  status.memoryStartMb = null;
 
-  bot = spawn(process.execPath, ["--trace-warnings", "--async-stack-traces", MAIN_FILE], {
-    cwd: ROOT,
-    stdio: ["inherit", "pipe", "pipe"],
-    env: {
-      ...process.env,
-      FORCE_COLOR: process.env.FORCE_COLOR || "1",
-      ...(botPort ? { PORT: String(botPort) } : {}) // cookie অটো-সিঙ্ক চালু থাকলে বট ভেতরের পোর্টে চলে
+  // আগের রানের পুরনো PID ফাইল সরিয়ে দেই। হোস্টে (Docker/Railway) PID পুনরায় ব্যবহার হয়,
+  // তাই stale ফাইল দেখে Main.js ভুলে "duplicate" ধরে বন্ধ হয়ে যেতে পারত।
+  // লঞ্চার আগের প্রসেস বন্ধ হওয়ার পরেই এখানে আসে, তাই এটা নিরাপদ।
+  try {
+    fs.unlinkSync(BOT_PID_FILE);
+  } catch (_) {}
+
+  bot = spawn(
+    process.execPath,
+    [`--max-old-space-size=${CONFIG.heapMb}`, "--trace-warnings", "--async-stack-traces", MAIN_FILE],
+    {
+      cwd: ROOT,
+      stdio: ["inherit", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        FORCE_COLOR: process.env.FORCE_COLOR || "1",
+        ...(botPort ? { PORT: String(botPort) } : {}) // cookie অটো-সিঙ্ক চালু থাকলে বট ভেতরের পোর্টে চলে
+      }
     }
-  });
+  );
 
   currentRunStartedAt = Date.now();
   connDownSince = null;
@@ -765,7 +786,7 @@ function startBot() {
   status.nextRestartAt = null;
   saveStatus();
 
-  info(`Main.js started (pid ${bot.pid})`);
+  info(`Main.js started (pid ${bot.pid}, heap limit ${CONFIG.heapMb}MB, RSS limit ${CONFIG.maxMemoryMb}MB)`);
 
   pipeOutput(bot.stdout, "out", (line) => console.log(line));
   pipeOutput(bot.stderr, "err", (line) => console.error(line));
