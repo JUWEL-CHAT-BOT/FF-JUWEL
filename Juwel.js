@@ -66,7 +66,22 @@ const CONFIG = {
   memoryStrikes: 3,                              // টানা এতবার বেশি পেলে তবেই রিস্টার্ট
   quickExitMs: 60 * 1000,                       // এর আগে exit 0 হলেও সেটা সমস্যা ধরা হবে (যেমন config/cookie ভুল)
   loginWaitMs: 10 * 60 * 1000,                  // এতক্ষণে লগইন (MQTT listener) না হলে আটকে গেছে ধরবে
-  maxStuckRestarts: 2                           // আটকে গেলে টানা সর্বোচ্চ এতবার রিস্টার্ট (এরপর শুধু alert)
+  downRestartMs: 15 * 60 * 1000,               // Facebook সংযোগ (MQTT) এতক্ষণ বন্ধ থাকলে বট রিস্টার্ট করবে
+  stuckRetryMs: 30 * 60 * 1000,                 // লগইন বারবার ব্যর্থ হলে থেমে না গিয়ে এতক্ষণ পরপর আবার চেষ্টা
+  maxStuckRestarts: 2,                           // আটকে গেলে টানা সর্বোচ্চ এতবার রিস্টার্ট (এরপর শুধু alert)
+
+  // Cookie অটো-সিঙ্ক (ব্রাউজার এক্সটেনশন থেকে নতুন cookie নেওয়া)
+  // চালু হয় শুধু Variables-এ COOKIE_SECRET (কমপক্ষে ১৬ অক্ষর) দিলে
+  cookieSync: {
+    secretEnv: "COOKIE_SECRET",                 // গোপন পাসওয়ার্ড (Railway Variables)
+    uidEnv: "COOKIE_UID",                       // ঐচ্ছিক: শুধু এই Facebook ID-র cookie নেবে
+    path: "/__juwel/cookie",                    // এক্সটেনশন এই ঠিকানায় পাঠায়
+    maxBodyBytes: 256 * 1024,
+    maxFailsPerIp: 10,                          // ভুল পাসওয়ার্ড এতবারের বেশি হলে সাময়িক বন্ধ
+    failWindowMs: 10 * 60 * 1000,
+    savedFile: "appstate.saved.json",           // data/ ফোল্ডারে (Volume থাকলে redeploy-এও থাকে)
+    persistIntervalMs: 10 * 60 * 1000
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -426,6 +441,7 @@ function pipeOutput(stream, tag, writer) {
     pushTail(`[${tag}] ${line}`);
     checkCookieLine(line);
     if (/MQTT listener registered/.test(line)) markLoginOk();
+    trackConnectionLine(line);
   });
 }
 
@@ -608,12 +624,14 @@ function requestPlannedRestart(reason) {
   plannedRestart = true;
   info(`Planned restart: ${reason}`);
   notify(`🔄 Planned restart: ${reason}`);
+  const target = bot;
   try {
-    bot.kill("SIGTERM");
+    target.kill("SIGTERM");
   } catch (_) {}
+  // শুধু এই নির্দিষ্ট প্রসেসটাই জোর করে বন্ধ করা হবে। নতুন চালু হওয়া বটকে নয়।
   setTimeout(() => {
     try {
-      if (bot) bot.kill("SIGKILL");
+      if (bot === target && target.exitCode === null && target.signalCode === null) target.kill("SIGKILL");
     } catch (_) {}
   }, 10000).unref();
 }
@@ -646,23 +664,51 @@ function markLoginOk() {
   saveStatus();
 }
 
-function armLoginWatch() {
+function armLoginWatch(waitMs) {
   loginOk = false;
   if (loginTimer) clearTimeout(loginTimer);
+  const wait = waitMs || CONFIG.loginWaitMs;
   loginTimer = setTimeout(() => {
     loginTimer = null;
     if (!bot || loginOk || shuttingDown || plannedRestart) return;
     if (stuckRestarts < CONFIG.maxStuckRestarts) {
       stuckRestarts += 1;
       requestPlannedRestart(
-        `${formatDuration(CONFIG.loginWaitMs)} হয়ে গেছে কিন্তু বট লগইন করেনি, আবার চেষ্টা (${stuckRestarts}/${CONFIG.maxStuckRestarts})`
+        `${formatDuration(wait)} হয়ে গেছে কিন্তু বট লগইন করেনি, আবার চেষ্টা (${stuckRestarts}/${CONFIG.maxStuckRestarts})`
       );
     } else {
+      // আগে এখানে শুধু alert দিয়ে থেমে যেত, বট অনির্দিষ্টকাল বন্ধ পড়ে থাকত। এখন ধীরে ধীরে আবার চেষ্টা চলতে থাকে।
       notify(
-        `🚨 বট বারবার লগইন করতে পারছে না। সম্ভবত cookie নষ্ট বা Facebook আটকে দিয়েছে। নতুন cookie দিয়ে আবার deploy করুন।${tailText()}`
+        `🚨 বট বারবার লগইন করতে পারছে না। সম্ভবত cookie নষ্ট বা Facebook আটকে দিয়েছে। Lemur-এ Facebook লগইন করুন (cookie অটো আসবে)। ${formatDuration(CONFIG.stuckRetryMs)} পরপর আবার চেষ্টা চলবে।${tailText()}`
       );
+      requestPlannedRestart(`লগইন হয়নি, ${formatDuration(CONFIG.stuckRetryMs)} পরপর আবার চেষ্টা`);
     }
-  }, CONFIG.loginWaitMs);
+  }, wait);
+  if (loginTimer.unref) loginTimer.unref();
+}
+
+// লগইনের পরে Facebook সংযোগ (MQTT) নষ্ট হয়ে বট চুপচাপ পড়ে থাকলে ধরার ব্যবস্থা
+let connDownSince = null;
+
+function trackConnectionLine(line) {
+  if (/MQTT socket is down|Re-listen did not come up|Re-listen failed|Fresh login failed|FATAL: Session|Session looks dead/i.test(line)) {
+    if (!connDownSince) connDownSince = Date.now();
+  } else if (
+    /MQTT listener registered|MQTT socket is connected again|reconnection successful|Fresh login OK|Listener restarted/i.test(line)
+  ) {
+    connDownSince = null;
+  }
+}
+
+function watchConnection() {
+  setInterval(() => {
+    if (!bot || shuttingDown || plannedRestart || !connDownSince) return;
+    const downFor = Date.now() - connDownSince;
+    if (downFor >= CONFIG.downRestartMs) {
+      connDownSince = null;
+      requestPlannedRestart(`Facebook সংযোগ ${formatDuration(downFor)} ধরে বন্ধ, বট রিস্টার্ট করা হচ্ছে`);
+    }
+  }, 60 * 1000).unref();
 }
 
 // বট বেশি RAM নিতে থাকলে (দীর্ঘ সময় চললে যা হয়) নিজে থেকে রিস্টার্ট
@@ -697,6 +743,8 @@ function watchMemory() {
 
 function startBot() {
   restartTimer = null;
+  if (bot) return; // দুইবার চালু হওয়া ঠেকানো
+  botEverStarted = true;
   outputTail.length = 0;
 
   bot = spawn(process.execPath, ["--trace-warnings", "--async-stack-traces", MAIN_FILE], {
@@ -704,12 +752,14 @@ function startBot() {
     stdio: ["inherit", "pipe", "pipe"],
     env: {
       ...process.env,
-      FORCE_COLOR: process.env.FORCE_COLOR || "1"
+      FORCE_COLOR: process.env.FORCE_COLOR || "1",
+      ...(botPort ? { PORT: String(botPort) } : {}) // cookie অটো-সিঙ্ক চালু থাকলে বট ভেতরের পোর্টে চলে
     }
   });
 
   currentRunStartedAt = Date.now();
-  armLoginWatch();
+  connDownSince = null;
+  armLoginWatch(stuckRestarts >= CONFIG.maxStuckRestarts ? CONFIG.stuckRetryMs : undefined);
   status.state = "running";
   status.totalStarts += 1;
   status.nextRestartAt = null;
@@ -727,6 +777,7 @@ function startBot() {
   bot.on("close", (code, signal) => {
     const uptimeMs = Date.now() - currentRunStartedAt;
     bot = null;
+    flushPendingCookie();
 
     if (shuttingDown) {
       status.state = "stopped";
@@ -829,6 +880,363 @@ function handleCrash(code, signal, uptimeMs) {
 }
 
 // ---------------------------------------------------------------------------
+// Cookie অটো-সিঙ্ক
+//   ব্রাউজার এক্সটেনশন Facebook লগইনের সাথে সাথে নতুন cookie এই ঠিকানায় পাঠায়:
+//   POST https://<আপনার-railway-ঠিকানা>/__juwel/cookie
+//   সার্ভার গোপন পাসওয়ার্ড মেলায়, একই একাউন্ট কিনা দেখে, appstate.json লেখে এবং বট নিজে রিস্টার্ট করে।
+//   cookie-র কোনো মান লগে বা alert-এ যায় না।
+// ---------------------------------------------------------------------------
+const http = require("http");
+const net = require("net");
+const crypto = require("crypto");
+
+const DATA_DIR = path.join(ROOT, "data");
+const SAVED_FILE = path.join(DATA_DIR, CONFIG.cookieSync.savedFile);
+
+let botPort = null;
+let botEverStarted = false;
+let pendingCookieWrite = null;
+const authFailsByIp = new Map();
+const authFailsAll = [];
+
+function cookieSecret() {
+  return String(process.env[CONFIG.cookieSync.secretEnv] || mergedEnv[CONFIG.cookieSync.secretEnv] || "").trim();
+}
+
+function cookieSyncEnabled() {
+  return cookieSecret().length >= 16;
+}
+
+function lockedUid() {
+  return String(process.env[CONFIG.cookieSync.uidEnv] || mergedEnv[CONFIG.cookieSync.uidEnv] || "").trim();
+}
+
+function safeEqual(a, b) {
+  const ha = crypto.createHash("sha256").update(String(a)).digest();
+  const hb = crypto.createHash("sha256").update(String(b)).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
+
+function cookieValue(cookies, name) {
+  if (!Array.isArray(cookies)) return "";
+  const c = cookies.find((x) => x && (x.key || x.name) === name);
+  return c ? String(c.value || "") : "";
+}
+
+function readCurrentCookies() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(ROOT, CONFIG.cookieFile), "utf8"));
+    if (Array.isArray(parsed) && parsed.length) return parsed;
+  } catch (_) {}
+  const envRaw = String(mergedEnv.APPSTATE || mergedEnv.APP_STATE || "").trim();
+  return envRaw ? decodeEnvCookies(envRaw) : null;
+}
+
+function writeJsonAtomic(file, data) {
+  const tmp = file + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(data, null, "\t"), { mode: 0o600 });
+  fs.renameSync(tmp, file);
+  try {
+    fs.chmodSync(file, 0o600);
+  } catch (_) {}
+}
+
+// বাইরে থেকে আসা cookie শুধরে নেওয়া: শুধু facebook.com-এর cookie, নিরাপদ অক্ষর, বট যে ফরম্যাট বোঝে (C3C-র মতো)
+function sanitizeCookies(list) {
+  if (!Array.isArray(list) || list.length === 0 || list.length > 200) return null;
+  const now = new Date().toISOString();
+  const out = [];
+  for (const c of list) {
+    if (!c || typeof c !== "object") return null;
+    const key = String(c.key !== undefined ? c.key : c.name !== undefined ? c.name : "");
+    const value = String(c.value !== undefined ? c.value : "");
+    if (!/^[A-Za-z0-9_.\-]{1,100}$/.test(key)) return null;
+    if (value.length > 4096 || /[\r\n;]/.test(value)) return null;
+    const domain = String(c.domain || "facebook.com").replace(/^\./, "").toLowerCase();
+    if (domain !== "facebook.com" && !domain.endsWith(".facebook.com")) continue; // অন্য সাইটের cookie বাদ
+    out.push({
+      key,
+      value,
+      domain,
+      path: typeof c.path === "string" && c.path ? c.path : "/",
+      hostOnly: !!c.hostOnly,
+      creation: typeof c.creation === "string" ? c.creation : now,
+      lastAccessed: now
+    });
+  }
+  return out;
+}
+
+function writeCookieFiles(cookies) {
+  const file = path.join(ROOT, CONFIG.cookieFile);
+  try {
+    if (fs.existsSync(file)) fs.copyFileSync(file, file + ".bak");
+  } catch (_) {}
+  writeJsonAtomic(file, cookies);
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    writeJsonAtomic(SAVED_FILE, cookies);
+  } catch (error) {
+    warn("সংরক্ষিত কপি লেখা যায়নি: " + error.message);
+  }
+}
+
+// বট চলা অবস্থায় ফাইল লিখলে বটের নিজের "persist" পুরনো cookie দিয়ে ঢেকে দিতে পারে,
+// তাই বট বন্ধ হওয়ার পর লিখি।
+function flushPendingCookie() {
+  if (!pendingCookieWrite) return;
+  const cookies = pendingCookieWrite;
+  pendingCookieWrite = null;
+  try {
+    writeCookieFiles(cookies);
+    info("নতুন cookie ফাইলে লেখা হয়েছে।");
+  } catch (error) {
+    warn("নতুন cookie লেখা যায়নি: " + error.message);
+  }
+}
+
+function applyNewCookie(cookies) {
+  for (const k of Object.keys(cookieAlertSentAt)) delete cookieAlertSentAt[k];
+  consecutiveFailures = 0;
+  crashTimes = [];
+  stuckRestarts = 0;
+  memoryStrikes = 0;
+  status.cookieUpdatedAt = new Date().toISOString();
+  info("নতুন Facebook cookie পাওয়া গেছে।");
+  notify("✅ নতুন Facebook cookie নেওয়া হয়েছে, বট নতুন করে চালু হচ্ছে।");
+
+  if (bot) {
+    pendingCookieWrite = cookies;
+    requestPlannedRestart("নতুন cookie পাওয়া গেছে");
+    return "restarting";
+  }
+
+  writeCookieFiles(cookies);
+  if (!botEverStarted) return "will-start"; // চালু হওয়ার ধাপেই আছে, শুরুতেই নতুন cookie পাবে
+  if (restartTimer) clearTimeout(restartTimer);
+  if (!shuttingDown) restartTimer = setTimeout(startBot, 500);
+  return "starting";
+}
+
+function corsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Max-Age": "86400"
+  };
+}
+
+function sendJson(res, code, body) {
+  if (res.headersSent) return;
+  res.writeHead(code, Object.assign({ "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }, corsHeaders()));
+  res.end(JSON.stringify(body));
+}
+
+function clientIp(req) {
+  const xff = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  return xff || (req.socket && req.socket.remoteAddress) || "unknown";
+}
+
+function recentFails(list) {
+  const now = Date.now();
+  while (list.length && now - list[0] > CONFIG.cookieSync.failWindowMs) list.shift();
+  return list.length;
+}
+
+function handleCookieRequest(req, res) {
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, corsHeaders());
+    return res.end();
+  }
+  if (req.method !== "POST") {
+    return sendJson(res, 405, { ok: false, message: "শুধু POST চলবে" });
+  }
+
+  const ip = clientIp(req);
+  const ipList = authFailsByIp.get(ip) || [];
+  authFailsByIp.set(ip, ipList);
+  if (recentFails(ipList) >= CONFIG.cookieSync.maxFailsPerIp || recentFails(authFailsAll) >= CONFIG.cookieSync.maxFailsPerIp * 4) {
+    req.resume();
+    return sendJson(res, 429, { ok: false, message: "অনেকবার ভুল হয়েছে, কিছুক্ষণ পর চেষ্টা করুন" });
+  }
+
+  const given = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  if (!given || !safeEqual(given, cookieSecret())) {
+    ipList.push(Date.now());
+    authFailsAll.push(Date.now());
+    warn("Cookie অটো-সিঙ্ক: ভুল গোপন পাসওয়ার্ড দিয়ে অনুরোধ এসেছে।");
+    req.resume();
+    return sendJson(res, 401, { ok: false, message: "গোপন পাসওয়ার্ড (Secret) মেলেনি" });
+  }
+
+  let size = 0;
+  let tooBig = false;
+  const chunks = [];
+  req.on("data", (d) => {
+    size += d.length;
+    if (size > CONFIG.cookieSync.maxBodyBytes) {
+      tooBig = true;
+      sendJson(res, 413, { ok: false, message: "ডেটা অনেক বড়" });
+      req.destroy();
+      return;
+    }
+    chunks.push(d);
+  });
+  req.on("error", () => {});
+  req.on("end", () => {
+    if (tooBig) return;
+    let body;
+    try {
+      body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+    } catch (_) {
+      return sendJson(res, 400, { ok: false, message: "ডেটা পড়া যায়নি" });
+    }
+
+    const current = readCurrentCookies();
+    const currentUid = cookieValue(current, "c_user");
+
+    if (body && body.test === true) {
+      return sendJson(res, 200, {
+        ok: true,
+        message: "সংযোগ ঠিক আছে" + (currentUid ? " (বটের একাউন্ট ID: " + currentUid + ")" : ""),
+        botState: status.state
+      });
+    }
+
+    const cookies = sanitizeCookies(body && body.cookies);
+    if (!cookies) return sendJson(res, 400, { ok: false, message: "cookie-র ফরম্যাট ঠিক নেই" });
+
+    const uid = cookieValue(cookies, "c_user");
+    const xs = cookieValue(cookies, "xs");
+    if (!/^\d{5,20}$/.test(uid) || !xs) {
+      return sendJson(res, 400, { ok: false, message: "c_user বা xs নেই (Facebook-এ লগইন করা আছে?)" });
+    }
+
+    const lock = lockedUid() || currentUid;
+    if (lock && lock !== uid) {
+      warn("Cookie অটো-সিঙ্ক: অন্য একাউন্টের cookie আসায় নেওয়া হয়নি।");
+      return sendJson(res, 409, {
+        ok: false,
+        message: "এটা অন্য একাউন্টের cookie (বটের ID: " + lock + ")। একাউন্ট বদলাতে চাইলে Variables-এ COOKIE_UID নতুন ID দিন।"
+      });
+    }
+
+    if (currentUid === uid && cookieValue(current, "xs") === xs) {
+      return sendJson(res, 200, { ok: true, unchanged: true, message: "cookie আগের মতোই আছে, কিছু বদলানো হয়নি" });
+    }
+
+    let mode;
+    try {
+      mode = applyNewCookie(cookies);
+    } catch (error) {
+      warn("নতুন cookie প্রয়োগ করা যায়নি: " + error.message);
+      return sendJson(res, 500, { ok: false, message: "সার্ভারে লিখতে সমস্যা হয়েছে" });
+    }
+    return sendJson(res, 200, {
+      ok: true,
+      message: mode === "restarting" ? "নতুন cookie নেওয়া হয়েছে, বট রিস্টার্ট হচ্ছে" : "নতুন cookie নেওয়া হয়েছে, বট চালু হচ্ছে"
+    });
+  });
+}
+
+function proxyToBot(req, res) {
+  if (!botPort) {
+    res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
+    return res.end("Bot is starting...");
+  }
+  const upstream = http.request(
+    { host: "127.0.0.1", port: botPort, path: req.url, method: req.method, headers: req.headers },
+    (pr) => {
+      res.writeHead(pr.statusCode || 502, pr.headers);
+      pr.pipe(res);
+    }
+  );
+  upstream.on("error", () => {
+    if (!res.headersSent) res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Bot is restarting...");
+  });
+  req.pipe(upstream);
+}
+
+// পাবলিক পোর্টে লঞ্চার শোনে। /__juwel/cookie লঞ্চার নিজে সামলায়, বাকি সব বটের ওয়েবসাইটে চলে যায়।
+// এতে বট বন্ধ বা লকআউট অবস্থায় থাকলেও নতুন cookie নেওয়া যায়।
+function startCookieServer() {
+  return new Promise((resolve) => {
+    if (!cookieSyncEnabled()) {
+      if (cookieSecret()) warn("COOKIE_SECRET কমপক্ষে ১৬ অক্ষরের হতে হবে। Cookie অটো-সিঙ্ক বন্ধ আছে।");
+      return resolve(false);
+    }
+    const publicPort = parseInt(process.env.PORT, 10) || 8080;
+    const probe = net.createServer();
+    probe.once("error", () => resolve(false));
+    probe.listen(0, "127.0.0.1", () => {
+      const internal = probe.address().port;
+      probe.close(() => {
+        const server = http.createServer((req, res) => {
+          try {
+            const url = String(req.url || "").split("?")[0];
+            if (url === CONFIG.cookieSync.path) return handleCookieRequest(req, res);
+            return proxyToBot(req, res);
+          } catch (_) {
+            try {
+              res.writeHead(500);
+              res.end();
+            } catch (__) {}
+          }
+        });
+        server.on("error", (error) => {
+          warn("Cookie অটো-সিঙ্ক সার্ভার চালু করা যায়নি: " + error.message);
+          resolve(false);
+        });
+        server.listen(publicPort, "0.0.0.0", () => {
+          botPort = internal;
+          info("Cookie অটো-সিঙ্ক চালু (পোর্ট " + publicPort + ")।");
+          resolve(true);
+        });
+      });
+    });
+  });
+}
+
+// Railway-তে redeploy হলে ফাইল রিসেট হয়। Volume-এ রাখা সর্বশেষ cookie তাই শুরুতে ফিরিয়ে আনি।
+function restoreSavedCookie() {
+  if (!cookieSyncEnabled()) return;
+  try {
+    if (!fs.existsSync(SAVED_FILE)) return;
+    const saved = JSON.parse(fs.readFileSync(SAVED_FILE, "utf8"));
+    if (!Array.isArray(saved) || !cookieValue(saved, "c_user") || !cookieValue(saved, "xs")) return;
+    const lock = lockedUid();
+    if (lock && cookieValue(saved, "c_user") !== lock) return;
+    const file = path.join(ROOT, CONFIG.cookieFile);
+    try {
+      if (fs.existsSync(file)) fs.copyFileSync(file, file + ".bak");
+    } catch (_) {}
+    writeJsonAtomic(file, saved);
+    info("আগের সংরক্ষিত Facebook cookie ফিরিয়ে আনা হয়েছে।");
+  } catch (error) {
+    warn("সংরক্ষিত cookie ফেরাতে সমস্যা: " + error.message);
+  }
+}
+
+// বট নিজে cookie নতুন করলে (login.js) সেটাও Volume-এর কপিতে রাখি।
+function syncSavedCookie() {
+  if (!cookieSyncEnabled()) return;
+  try {
+    const cur = JSON.parse(fs.readFileSync(path.join(ROOT, CONFIG.cookieFile), "utf8"));
+    if (!Array.isArray(cur) || !cookieValue(cur, "c_user") || !cookieValue(cur, "xs")) return;
+    let saved = null;
+    try {
+      saved = JSON.parse(fs.readFileSync(SAVED_FILE, "utf8"));
+    } catch (_) {}
+    if (saved && cookieValue(saved, "c_user") !== cookieValue(cur, "c_user")) return;
+    if (saved && JSON.stringify(saved) === JSON.stringify(cur)) return;
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    writeJsonAtomic(SAVED_FILE, cur);
+  } catch (_) {}
+}
+
+// ---------------------------------------------------------------------------
 // শাটডাউন
 // ---------------------------------------------------------------------------
 function quit(code) {
@@ -892,6 +1300,9 @@ process.on("SIGTERM", () => stopBot("SIGTERM"));
 
 process.on("exit", () => {
   try {
+    syncSavedCookie();
+  } catch (_) {}
+  try {
     if (readPid() === process.pid) fs.unlinkSync(PID_FILE);
   } catch (_) {}
   if (bot && bot.exitCode === null && bot.signalCode === null) {
@@ -910,6 +1321,10 @@ process.on("exit", () => {
 
   cleanOldLogs();
   setInterval(cleanOldLogs, 6 * 60 * 60 * 1000).unref();
+
+  restoreSavedCookie();
+  await startCookieServer();
+  setInterval(syncSavedCookie, CONFIG.cookieSync.persistIntervalMs).unref();
 
   const { errors, warnings } = runStartupChecks();
 
@@ -954,6 +1369,7 @@ process.on("exit", () => {
   status.credit = CONFIG.bannerText;
   scheduleDailyRestart();
   watchMemory();
+  watchConnection();
 
   await notify(`✅ ${CONFIG.projectName} চালু হয়েছে (v${status.version}) — ${CONFIG.bannerText}`);
   startBot();
