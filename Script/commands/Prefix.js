@@ -15,7 +15,7 @@ module.exports.config = {
 
 // Put your own links here
 const OWNER_FB_LINK = "https://www.fb.com/mrjuwel444";
-const SUPPORT_LINK = "https://m.me/your.support.group";
+const SUPPORT_LINK = "https://m.me/j/bUq30eov7FMa149R/?send_source=gc%3Acopy_invite_link_t";
 
 // Auto delete time for the info card (20 seconds)
 const DELETE_AFTER = 20000;
