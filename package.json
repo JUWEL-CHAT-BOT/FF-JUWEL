@@ -1,7 +1,7 @@
 {
-  "name": "shahadat-chat-bot",
+  "name": "mirai-goat-mix-mix",
   "version": "3.0.0",
-  "description": "Made By SHAHADAT SAHU",
+  "description": "MIRAI + GoatBot hybrid Messenger bot - runs Mirai AND GoatBot commands/events side by side. Based on Mirai (乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐).",
   "main": "Juwel.js",
   "engines": {
     "node": "22.x",
@@ -18,13 +18,13 @@
   "keywords": [
     "bot",
     "facebook",
-    "shahadatproject",
+    "juwelproject",
     "messenger",
     "javascript",
-    "shadat",
-    "UhasSahu",
-    "shahadat sahu",
-    "shahadat chat bot"
+    "JUWEL",
+    "mirai",
+    "goat",
+    "goat mirai mix bot"
   ],
   "author": "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   "license": "MIT",
