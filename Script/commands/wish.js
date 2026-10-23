@@ -1,6 +1,6 @@
 module.exports.config = {
   name: "wish",
-  version: "2.0.0",
+  version: "2.1.0",
   hasPermssion: 0,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "Happy birthday wish for your friends (global groups)",
@@ -14,12 +14,18 @@ module.exports.config = {
   cooldowns: 0
 };
 
+// বাংলাদেশ টাইমজোন (UTC+6)
+const TZ_OFFSET_MS = 6 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 // Global store for all scheduled birthday wishes (in-memory)
 const scheduledBirthday = global.scheduledBirthday = global.scheduledBirthday || {
   targets: [],     // array of { targetID, wisherName }
   timer: null,
   timerSet: false
 };
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 module.exports.wrapText = (ctx, text, maxWidth) => {
   return new Promise(resolve => {
@@ -66,7 +72,7 @@ async function createWish(targetID, wisherName, api, Users) {
   const cacheDir = __dirname + "/cache";
   fs.ensureDirSync(cacheDir);
 
-  const uniqueTag = Date.now() + "_" + targetID;
+  const uniqueTag = Date.now() + "_" + targetID + "_" + Math.floor(Math.random() * 1000);
   const bgPath = `${cacheDir}/background_${uniqueTag}.png`;
   const avtPath = `${cacheDir}/Avtmot_${uniqueTag}.png`;
 
@@ -131,11 +137,11 @@ async function createWish(targetID, wisherName, api, Users) {
   };
 }
 
+// বাংলাদেশ সময় অনুযায়ী রাত ১২টা পর্যন্ত বাকি সময় (ms)
 function getDelayToMidnight() {
-  const now = new Date();
-  const midnight = new Date(now);
-  midnight.setHours(24, 0, 0, 0);
-  return midnight.getTime() - now.getTime();
+  const nowDhaka = Date.now() + TZ_OFFSET_MS;
+  const delay = DAY_MS - (nowDhaka % DAY_MS);
+  return delay <= 0 ? DAY_MS : delay;
 }
 
 function formatTimeRemaining(ms) {
@@ -169,49 +175,95 @@ function createNotice(targetName, delayMs) {
   return frame;
 }
 
+// বটের সব গ্রুপের threadID সংগ্রহ (callback + global data দুটোই ব্যবহার)
+function getGroupThreadIDs(api) {
+  return new Promise(resolve => {
+    const ids = new Set();
+    try {
+      (global.data && global.data.allThreadID || []).forEach(id => ids.add(String(id)));
+    } catch (e) {}
+
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      resolve([...ids]);
+    };
+
+    // কলব্যাক না এলে ১৫ সেকেন্ড পর এগিয়ে যাবে
+    const t = setTimeout(finish, 15000);
+
+    try {
+      api.getThreadList(100, null, ["INBOX"], (err, list) => {
+        clearTimeout(t);
+        if (!err && Array.isArray(list)) {
+          list.filter(x => x.isGroup && x.threadID).forEach(x => ids.add(String(x.threadID)));
+        } else if (err) {
+          console.error("getThreadList error:", err);
+        }
+        finish();
+      });
+    } catch (e) {
+      clearTimeout(t);
+      console.error("getThreadList exception:", e);
+      finish();
+    }
+  });
+}
+
+function getThreadInfoAsync(api, threadID) {
+  return new Promise((resolve, reject) => {
+    api.getThreadInfo(threadID, (err, info) => (err ? reject(err) : resolve(info)));
+  });
+}
+
+function sendAsync(api, msg, threadID) {
+  return new Promise(resolve => {
+    api.sendMessage(msg, threadID, (err, info) => resolve({ err, info }));
+  });
+}
+
 /**
  * Execute all scheduled wishes at midnight.
  */
 async function executeScheduledWishes(api, Users) {
   const fs = require("fs-extra");
-  const targets = scheduledBirthday.targets.slice(); // copy
+  const targets = scheduledBirthday.targets.slice();
 
-  // Clear list before processing to avoid duplicate sends if something fails
   scheduledBirthday.targets = [];
   scheduledBirthday.timerSet = false;
+  scheduledBirthday.timer = null;
 
   if (targets.length === 0) return;
 
   try {
-    // Get all threads (groups) the bot is in
-    const threadList = await api.getThreadList(0, 0, 'ALL');
-    const groupThreads = threadList.filter(t => t.isGroup && t.threadID);
+    const threadIDs = await getGroupThreadIDs(api);
+    console.log(`[wish] midnight: ${targets.length} target, ${threadIDs.length} group`);
 
-    // For each target, check each group and send wish
     for (const { targetID, wisherName } of targets) {
-      const targetName = await Users.getNameUser(targetID);
-
-      for (const thread of groupThreads) {
+      for (const threadID of threadIDs) {
         try {
-          const threadInfo = await api.getThreadInfo(thread.threadID);
-          // Check if target is a participant
-          if (threadInfo.participantIDs && threadInfo.participantIDs.includes(targetID)) {
-            const wishData = await createWish(targetID, wisherName, api, Users);
-            await api.sendMessage(
-              { body: wishData.body, attachment: wishData.attachment },
-              thread.threadID,
-              () => {
-                if (fs.existsSync(wishData.bgPath)) fs.unlinkSync(wishData.bgPath);
-              }
-            );
-          }
+          const threadInfo = await getThreadInfoAsync(api, threadID);
+          const members = (threadInfo && threadInfo.participantIDs || []).map(String);
+          if (!members.includes(String(targetID))) continue;
+
+          const wishData = await createWish(targetID, wisherName, api, Users);
+          const { err } = await sendAsync(
+            api,
+            { body: wishData.body, attachment: wishData.attachment },
+            threadID
+          );
+          if (err) console.error(`[wish] send failed ${threadID}:`, err);
+          if (fs.existsSync(wishData.bgPath)) fs.unlinkSync(wishData.bgPath);
+
+          await sleep(2000); // ফ্লাড/ব্লক এড়াতে বিরতি
         } catch (err) {
-          console.error(`Failed to send wish to thread ${thread.threadID} for ${targetID}:`, err);
+          console.error(`[wish] thread ${threadID} / user ${targetID}:`, err);
         }
       }
     }
   } catch (err) {
-    console.error("Error executing scheduled wishes:", err);
+    console.error("[wish] Error executing scheduled wishes:", err);
   }
 }
 
@@ -222,8 +274,8 @@ function scheduleMidnightTask(api, Users) {
   if (scheduledBirthday.timerSet) return;
   const delay = getDelayToMidnight();
 
-  scheduledBirthday.timer = setTimeout(async () => {
-    await executeScheduledWishes(api, Users);
+  scheduledBirthday.timer = setTimeout(() => {
+    executeScheduledWishes(api, Users).catch(e => console.error("[wish]", e));
   }, delay);
 
   scheduledBirthday.timerSet = true;
@@ -239,7 +291,7 @@ module.exports.run = async function ({
 }) {
   try {
     // Determine target: mention > reply > sender
-    let targetID = Object.keys(event.mentions)[0];
+    let targetID = Object.keys(event.mentions || {})[0];
     if (!targetID && event.messageReply) {
       targetID = event.messageReply.senderID;
     }
@@ -250,7 +302,7 @@ module.exports.run = async function ({
     const wisherName = await Users.getNameUser(event.senderID);
     const targetName = await Users.getNameUser(targetID);
 
-    // If target is the sender himself, send immediately (original behaviour)
+    // নিজের জন্য হলে সাথে সাথে পাঠাবে
     if (targetID === event.senderID) {
       const wishData = await createWish(targetID, wisherName, api, Users);
       return api.sendMessage(
@@ -270,10 +322,8 @@ module.exports.run = async function ({
       scheduledBirthday.targets.push({ targetID, wisherName });
     }
 
-    // Schedule midnight task if not already set
     scheduleMidnightTask(api, Users);
 
-    // Send confirmation notice
     const delay = getDelayToMidnight();
     const notice = createNotice(targetName, delay);
     await api.sendMessage(notice, event.threadID, event.messageID);
