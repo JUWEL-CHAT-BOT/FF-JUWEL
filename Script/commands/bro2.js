@@ -1,6 +1,6 @@
 module.exports.config = {
   name: "bro2",
-  version: "5.0.0",
+  version: "5.1.0",
   hasPermssion: 0,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "Friendship Forever banner with target mention and random brotherhood caption",
@@ -18,10 +18,23 @@ module.exports.config = {
 
 // ====== Template settings ======
 const TEMPLATE_URL = "https://i.imgur.com/D3iBml2.jpeg";
+
+// ⚠️ REF_W / REF_H = টেমপ্লেট ছবির আসল সাইজ (পিক্সেল)।
+// DEBUG = true করলে লাল বৃত্ত আঁকা হবে + কনসোলে আসল সাইজ দেখাবে।
+// সাইজ আলাদা হলে এখানে সেই সাইজ বসান, তারপর LEFT/RIGHT ঠিক করুন।
 const REF_W = 1774;
 const REF_H = 887;
-const LEFT  = { x: 430,  y: 396, r: 195 };
-const RIGHT = { x: 1370, y: 398, r: 195 };
+
+// x, y = বৃত্তের কেন্দ্র | r = ব্যাসার্ধ (REF সাইজ অনুযায়ী)
+const LEFT  = { x: 429,  y: 389, r: 198 };
+const RIGHT = { x: 1343, y: 389, r: 198 };
+
+// ছোটখাটো সমন্বয়ের জন্য (পিক্সেলে, REF সাইজ অনুযায়ী)
+// dx: + মানে ডানে, - মানে বামে | dy: + মানে নিচে, - মানে উপরে | dr: + বড়, - ছোট
+const ADJUST_LEFT  = { dx: 0, dy: 0, dr: 0 };
+const ADJUST_RIGHT = { dx: 0, dy: 0, dr: 0 };
+
+const DEBUG = false; // জায়গা ঠিক করার সময় true করুন
 const CREDIT = "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐";
 // ================================
 
@@ -176,6 +189,12 @@ module.exports.run = async function ({ event, api }) {
 
     const W = template.width;
     const H = template.height;
+
+    if (DEBUG) {
+      console.log(`BRO2 template size: ${W} x ${H} (REF: ${REF_W} x ${REF_H})`);
+    }
+
+    // টেমপ্লেটের আসল সাইজ অনুযায়ী স্কেল
     const sx = W / REF_W;
     const sy = H / REF_H;
     const sr = Math.min(sx, sy);
@@ -184,21 +203,49 @@ module.exports.run = async function ({ event, api }) {
     const ctx = canvas.getContext("2d");
     ctx.drawImage(template, 0, 0, W, H);
 
-    const drawAvatar = (img, c) => {
-      const cx = c.x * sx;
-      const cy = c.y * sy;
-      const r = c.r * sr;
+    const getCircle = (c, adj) => ({
+      cx: (c.x + adj.dx) * sx,
+      cy: (c.y + adj.dy) * sy,
+      r: (c.r + adj.dr) * sr
+    });
+
+    // অবতার "cover" মোডে বসবে, যাতে বৃত্ত পুরো ভরে এবং ছবি না বেঁকে
+    const drawAvatar = (img, circle) => {
+      const { cx, cy, r } = circle;
+      const size = r * 2;
+      const scale = Math.max(size / img.width, size / img.height);
+      const dw = img.width * scale;
+      const dh = img.height * scale;
+
       ctx.save();
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.closePath();
       ctx.clip();
-      ctx.drawImage(img, cx - r, cy - r, r * 2, r * 2);
+      ctx.drawImage(img, cx - dw / 2, cy - dh / 2, dw, dh);
       ctx.restore();
     };
 
-    drawAvatar(avatar1, LEFT);
-    drawAvatar(avatar2, RIGHT);
+    const leftCircle = getCircle(LEFT, ADJUST_LEFT);
+    const rightCircle = getCircle(RIGHT, ADJUST_RIGHT);
+
+    drawAvatar(avatar1, leftCircle);
+    drawAvatar(avatar2, rightCircle);
+
+    // DEBUG: লাল বৃত্ত আর কেন্দ্র বিন্দু
+    if (DEBUG) {
+      ctx.strokeStyle = "red";
+      ctx.fillStyle = "red";
+      ctx.lineWidth = Math.max(3, W / 400);
+      for (const c of [leftCircle, rightCircle]) {
+        ctx.beginPath();
+        ctx.arc(c.cx, c.cy, c.r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(c.cx, c.cy, 6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
 
     fs.writeFileSync(imgPath, canvas.toBuffer("image/png"));
 
