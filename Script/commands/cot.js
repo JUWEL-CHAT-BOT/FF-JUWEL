@@ -1,13 +1,13 @@
 module.exports.config = {
   name: "cot",
-  version: "2.0.0",
+  version: "3.0.0",
   hasPermssion: 0,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "Cot banner: ছেলে (মেনশন/রিপ্লাই) + গ্রুপের র‍্যান্ডম মেয়ে",
   commandCategory: "banner",
   usePrefix: true,
   usages: "[@ছেলে মেনশন | ছেলের মেসেজে রিপ্লাই]",
-  cooldowns: 40,
+  cooldowns: 15,
   dependencies: {
     "axios": "",
     "fs-extra": "",
@@ -29,13 +29,22 @@ const RIGHT = { x: 750, y: 193, rx: 66, ry: 66 };
 // true হলে যে কমান্ড দিবে তারও ছেলে হতে হবে
 const REQUIRE_MALE_SENDER = true;
 
-// মেসেজে শুধু এই লেখাটা যাবে
-const TEXT = "বন্ধু চিপায় কট খাইছে😂";
+// ====== Speed settings ======
+const API_TIMEOUT = 8000;        // প্রতিটা api কলের সর্বোচ্চ সময় (ms)
+const THREAD_TIMEOUT = 8000;     // গ্রুপ info আনার সর্বোচ্চ সময়
+const BATCH_SIZE = 8;            // একবারে কতজনের জেন্ডার চেক হবে
+const BATCH_TIMEOUT = 6000;      // প্রতি ব্যাচের সর্বোচ্চ সময়
+const GENDER_CACHE_TTL = 30 * 60 * 1000; // ৩০ মিনিট
 // ================================
 
 // gender: 1 = মেয়ে, 2 = ছেলে (অথবা "female"/"male")
 const isFemale = (g) => g === 1 || g === "1" || String(g).toLowerCase() === "female";
-const isMale = (g) => g === 2 || g === "2" || String(g).toLowerCase() === "male";
+
+// মেমোরি ক্যাশ: একবার আনা info আবার আনতে হবে না
+const userCache = new Map();   // id -> { data, t }
+let templateImg = null;        // লোড হওয়া টেমপ্লেট (মেমোরিতে)
+
+const sleep = (ms, val) => new Promise((res) => setTimeout(() => res(val), ms));
 
 module.exports.run = async function ({ event, api }) {
   const axios = require("axios");
@@ -45,7 +54,7 @@ module.exports.run = async function ({ event, api }) {
 
   const { threadID, messageID, senderID, mentions, messageReply } = event;
 
-  // কলব্যাক ও প্রমিস দুই ধরনের api-তেই কাজ করে, আর ঝুলে গেলে ২০ সেকেন্ডে এরর দেয়
+  // কলব্যাক ও প্রমিস দুই ধরনের api-তেই কাজ করে, ঝুলে গেলে API_TIMEOUT-এ এরর দেয়
   const callApi = (fn, arg, label) =>
     new Promise((resolve, reject) => {
       let done = false;
@@ -53,9 +62,11 @@ module.exports.run = async function ({ event, api }) {
         if (done) return;
         done = true;
         clearTimeout(timer);
-        err ? reject(err instanceof Error ? err : new Error(label + " failed: " + JSON.stringify(err))) : resolve(data || {});
+        err
+          ? reject(err instanceof Error ? err : new Error(label + " failed: " + JSON.stringify(err)))
+          : resolve(data || {});
       };
-      const timer = setTimeout(() => finish(new Error(label + " timeout")), 20000);
+      const timer = setTimeout(() => finish(new Error(label + " timeout")), API_TIMEOUT);
       try {
         const ret = fn(arg, (err, data) => finish(err, data));
         if (ret && typeof ret.then === "function") {
@@ -66,26 +77,38 @@ module.exports.run = async function ({ event, api }) {
       }
     });
 
-  // প্রতিটা আইডি আলাদা করে আনে; কোনো আইডি invalid হলে শুধু সেটা বাদ যায়, পুরো কাজ থামে না
+  // ক্যাশসহ ইউজার info; সব আইডি প্যারালালে আনে, ব্যর্থ আইডি বাদ যায়
   const getUserInfo = async (ids) => {
     const list = [...new Set((Array.isArray(ids) ? ids : [ids]).map(String))].filter((x) => /^\d+$/.test(x));
     const result = {};
-    for (let i = 0; i < list.length; i += 10) {
-      const chunk = list.slice(i, i + 10);
-      await Promise.all(
-        chunk.map(async (id) => {
-          try {
-            const d = await callApi(api.getUserInfo.bind(api), id, "getUserInfo");
-            if (d && d[id]) result[id] = d[id];
-            else if (d && typeof d === "object" && d.gender !== undefined) result[id] = d;
-          } catch (e) {
-            console.log("COT getUserInfo skip", id, e.message);
-          }
-        })
-      );
+    const now = Date.now();
+    const need = [];
+
+    for (const id of list) {
+      const c = userCache.get(id);
+      if (c && now - c.t < GENDER_CACHE_TTL) result[id] = c.data;
+      else need.push(id);
     }
+
+    await Promise.all(
+      need.map(async (id) => {
+        try {
+          const d = await callApi(api.getUserInfo.bind(api), id, "getUserInfo");
+          let data = null;
+          if (d && d[id]) data = d[id];
+          else if (d && typeof d === "object" && d.gender !== undefined) data = d;
+          if (data) {
+            userCache.set(id, { data, t: Date.now() });
+            result[id] = data;
+          }
+        } catch (e) {
+          console.log("COT getUserInfo skip", id, e.message);
+        }
+      })
+    );
     return result;
   };
+
   const getThreadInfo = (tid) => callApi(api.getThreadInfo.bind(api), tid, "getThreadInfo");
 
   // ছেলে কে (মেনশন বা রিপ্লাই)
@@ -110,11 +133,12 @@ module.exports.run = async function ({ event, api }) {
   const templatePath = path.join(cacheDir, "cot_template.jpg");
 
   const getTemplate = async () => {
+    if (templateImg) return templateImg;
     if (!fs.existsSync(templatePath)) {
       try {
         const res = await axios.get(TEMPLATE_URL, {
           responseType: "arraybuffer",
-          timeout: 30000,
+          timeout: 15000,
           headers: {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
             "Referer": "https://imgur.com/"
@@ -125,13 +149,14 @@ module.exports.run = async function ({ event, api }) {
         throw new Error("TEMPLATE download failed: " + (err.response?.status || err.message));
       }
     }
-    return loadImage(templatePath);
+    templateImg = await loadImage(templatePath);
+    return templateImg;
   };
 
   const getAvatar = async (uid) => {
     const url = `https://graph.facebook.com/${uid}/picture?width=720&height=720&access_token=6628568379|c1e620fa708a1d5696fb991c1bde5662`;
     try {
-      const res = await axios.get(url, { responseType: "arraybuffer", timeout: 20000 });
+      const res = await axios.get(url, { responseType: "arraybuffer", timeout: 12000 });
       return loadImage(Buffer.from(res.data));
     } catch (err) {
       throw new Error("AVATAR download failed: " + (err.response?.status || err.message));
@@ -139,59 +164,68 @@ module.exports.run = async function ({ event, api }) {
   };
 
   try {
-    // ---- ছেলে কি না চেক ----
+    // ---- সব ধীর কাজ একসাথে শুরু (প্যারালাল) ----
+    const templateP = getTemplate();
+    const boyAvatarP = getAvatar(boyID);
+    const threadP = Promise.race([
+      getThreadInfo(threadID),
+      sleep(THREAD_TIMEOUT).then(() => {
+        throw new Error("getThreadInfo slow");
+      })
+    ]).catch((e) => {
+      console.log("COT threadInfo fallback:", e.message);
+      return { participantIDs: [] };
+    });
     const checkIDs = REQUIRE_MALE_SENDER ? [boyID, senderID] : [boyID];
-    const infos = await getUserInfo(checkIDs);
+    const infosP = getUserInfo(checkIDs);
 
+    // কোনো প্রমিস আগে ফেল করলে unhandled rejection এড়াতে
+    templateP.catch(() => {});
+    boyAvatarP.catch(() => {});
+
+    // ---- ছেলে কি না চেক ----
+    const infos = await infosP;
     console.log("COT gender check:", "sender", senderID, infos[senderID]?.gender, "| boy", boyID, infos[boyID]?.gender);
 
-    // শুধু স্পষ্টভাবে "মেয়ে" ধরা পড়লেই আটকাবে; জেন্ডার না পাওয়া গেলে (হাইড/অজানা) চলতে দিবে
+    // শুধু স্পষ্টভাবে "মেয়ে" ধরা পড়লেই আটকাবে; জেন্ডার না পাওয়া গেলে চলতে দিবে
     if (REQUIRE_MALE_SENDER && isFemale(infos[senderID]?.gender)) {
-      return api.sendMessage(
-        "⚠️ এই কমান্ড শুধু ছেলেরা ব্যবহার করতে পারবে!",
-        threadID,
-        messageID
-      );
+      return api.sendMessage("⚠️ এই কমান্ড শুধু ছেলেরা ব্যবহার করতে পারবে!", threadID, messageID);
     }
     if (isFemale(infos[boyID]?.gender)) {
-      return api.sendMessage(
-        "⚠️ কোনো ছেলেকে মেনশন করো বা রিপ্লাই দাও! (মেয়েকে নয়)",
-        threadID,
-        messageID
-      );
+      return api.sendMessage("⚠️ কোনো ছেলেকে মেনশন করো বা রিপ্লাই দাও! (মেয়েকে নয়)", threadID, messageID);
     }
 
-    // ---- গ্রুপ থেকে র‍্যান্ডম মেয়ে খোঁজা ----
-    const threadInfo = await getThreadInfo(threadID);
+    // ---- গ্রুপ থেকে র‍্যান্ডম মেয়ে খোঁজা (শাফল + ব্যাচ, পেলেই থামবে) ----
+    const threadInfo = await threadP;
     const botID = api.getCurrentUserID ? api.getCurrentUserID() : null;
     const members = (threadInfo.participantIDs || []).filter(
       (id) => id !== botID && id !== boyID && id !== senderID
     );
 
+    // শাফল
+    for (let i = members.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [members[i], members[j]] = [members[j], members[i]];
+    }
+
     let girlID = null;
     let girlName = null;
-    if (members.length > 0) {
-      const allInfo = await getUserInfo(members);
-      const girls = members.filter((id) => isFemale(allInfo[id]?.gender));
-      if (girls.length > 0) {
-        girlID = girls[Math.floor(Math.random() * girls.length)];
-        girlName = allInfo[girlID]?.name || null;
+
+    for (let i = 0; i < members.length && !girlID; i += BATCH_SIZE) {
+      const chunk = members.slice(i, i + BATCH_SIZE);
+      const info = await Promise.race([getUserInfo(chunk), sleep(BATCH_TIMEOUT, {})]);
+      const found = chunk.find((id) => isFemale(info[id]?.gender));
+      if (found) {
+        girlID = found;
+        girlName = info[found]?.name || null;
       }
     }
 
     if (!girlID) {
-      return api.sendMessage(
-        "⚠️ এই গ্রুপে কোনো মেয়ে খুঁজে পাওয়া যায়নি!",
-        threadID,
-        messageID
-      );
+      return api.sendMessage("⚠️ এই গ্রুপে কোনো মেয়ে খুঁজে পাওয়া যায়নি!", threadID, messageID);
     }
 
-    const [template, boyAvatar, girlAvatar] = await Promise.all([
-      getTemplate(),
-      getAvatar(boyID),
-      getAvatar(girlID)
-    ]);
+    const [template, boyAvatar, girlAvatar] = await Promise.all([templateP, boyAvatarP, getAvatar(girlID)]);
 
     const W = template.width;
     const H = template.height;
@@ -252,10 +286,6 @@ module.exports.run = async function ({ event, api }) {
     );
   } catch (e) {
     console.log("COT CMD ERROR:", e.response?.status, e.message);
-    return api.sendMessage(
-      "Error: " + (e.response?.status || e.message),
-      threadID,
-      messageID
-    );
+    return api.sendMessage("Error: " + (e.response?.status || e.message), threadID, messageID);
   }
 };
