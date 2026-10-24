@@ -52,6 +52,8 @@ const COOLDOWN = 2 * 60 * 1000; // ২ মিনিট
 const SELECT_TIMEOUT = 20 * 1000; // ২০ সেকেন্ড
 const MAX_RESULTS = 5;
 const PRELOAD_COUNT = 2; // কতগুলো গান আগে থেকে রেডি করা হবে (সার্ভারে চাপ পড়লে ৩ করো)
+const SEARCH_TIMEOUT = 60 * 1000; // সার্চ API-র জন্য ৬০ সেকেন্ড (সার্ভার ঘুমিয়ে থাকলে জাগতে সময় লাগে)
+const SEARCH_RETRIES = 2; // মোট কয়বার চেষ্টা করবে
 const cooldowns = new Map();
 
 const cacheDir = path.join(__dirname, "cache");
@@ -72,7 +74,7 @@ const ytapi = async () => {
 module.exports.config = {
   name: "song",
   aliases: ["music", "songs", "gan"],
-  version: "2.3.0",
+  version: "2.4.0",
   credits: CREDIT,
   countDown: 0,
   hasPermssion: 0,
@@ -176,6 +178,46 @@ const formatViews = v => {
   else out = String(n);
   return out + " views";
 };
+
+/* ───────────── সার্চ (রিট্রাই + ব্যাকআপ) ───────────── */
+// ১) আগে sahu-api দিয়ে সার্চ, ২ বার চেষ্টা করবে
+// ২) তাও ব্যর্থ হলে yt-search প্যাকেজ থাকলে সেটা দিয়ে সার্চ (npm i yt-search)
+async function searchSongs(query) {
+  let lastErr = null;
+
+  for (let attempt = 1; attempt <= SEARCH_RETRIES; attempt++) {
+    try {
+      const API = await ytapi();
+      const { data } = await axios.get(`${API}/api/search`, {
+        params: { q: query, limit: 15 },
+        timeout: SEARCH_TIMEOUT
+      });
+      if (data && Array.isArray(data.results) && data.results.length)
+        return data.results;
+      throw new Error("কোনো গান পাওয়া যায়নি");
+    } catch (e) {
+      lastErr = e;
+      console.log(`[song] সার্চ চেষ্টা ${attempt} ব্যর্থ: ${e.message}`);
+      apiCache = { url: null, time: 0 }; // পরেরবার API লিংক নতুন করে আনবে
+      if (attempt < SEARCH_RETRIES) await sleep(1500);
+    }
+  }
+
+  // ব্যাকআপ: yt-search
+  try {
+    const yts = require("yt-search");
+    const r = await yts(query);
+    const videos = (r.videos || []).slice(0, 15);
+    if (videos.length) {
+      console.log("[song] yt-search দিয়ে রেজাল্ট আনা হয়েছে");
+      return videos;
+    }
+  } catch (e) {
+    console.log("[song] yt-search ব্যাকআপ কাজ করেনি:", e.message);
+  }
+
+  throw lastErr || new Error("সার্চ ব্যর্থ");
+}
 
 /* ───────────── ক্যানভাস হেল্পার ───────────── */
 function roundRect(ctx, x, y, w, h, r) {
@@ -303,7 +345,7 @@ async function createJob(song) {
   const { data: job } = await axios.post(
     `${API}/api/download`,
     { url: song.url, format: "mp3" },
-    { timeout: 30000 }
+    { timeout: 60000 }
   );
   const jobId = job?.job_id || job?.id;
   if (!jobId) {
@@ -405,14 +447,10 @@ module.exports.run = async ({ api, event, args }) => {
 
   const thumbFiles = [];
   try {
-    const API = await ytapi();
-    const { data } = await axios.get(`${API}/api/search`, {
-      params: { q: query, limit: 15 },
-      timeout: 30000
-    });
+    const results = await searchSongs(query);
 
     const seen = new Set();
-    const songs = (data.results || [])
+    const songs = results
       .filter(s => {
         const id = s.videoId || s.id || s.url;
         if (!id || seen.has(id)) return false;
@@ -476,10 +514,11 @@ module.exports.run = async ({ api, event, args }) => {
     safeUnsend(api, searchMsg?.messageID);
     cleanup(thumbFiles);
     cooldowns.delete(senderID);
+    const reason = /timeout/i.test(error.message)
+      ? "সার্চ সার্ভার সাড়া দিচ্ছে না, একটু পরে আবার চেষ্টা করুন।"
+      : error.response?.data?.error?.message || error.message;
     return api.sendMessage(
-      `⚠️ সার্চ ব্যর্থ হয়েছে\n${
-        error.response?.data?.error?.message || error.message
-      }`,
+      `⚠️ সার্চ ব্যর্থ হয়েছে\n${reason}`,
       threadID,
       messageID
     );
