@@ -3,12 +3,12 @@ const path = require("path");
 
 module.exports.config = {
  name: "addadmin",
- version: "4.0.0",
+ version: "4.1.0",
  hasPermssion: 2,
- credits: "𝐌𝐑 𝐉𝐔𝐖𝐄𝐋",
+ credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
  description: "বাংলা Ultimate Admin System (Add + Protect + Temp + Log)",
  commandCategory: "group",
- usages: "reply / @mention / UID / সময়",
+ usages: "reply / @mention / UID / সময়",
  cooldowns: 5
 };
 
@@ -17,8 +17,12 @@ const dataPath = path.join(__dirname, "adminData.json");
 
 // 📥 ডাটা লোড
 function loadData() {
+ try {
  if (!fs.existsSync(dataPath)) return {};
- return JSON.parse(fs.readFileSync(dataPath));
+ return JSON.parse(fs.readFileSync(dataPath, "utf8"));
+ } catch {
+ return {};
+ }
 }
 
 // 💾 ডাটা সেভ
@@ -26,38 +30,36 @@ function saveData(data) {
  fs.writeFileSync(dataPath, JSON.stringify(data, null, 2));
 }
 
+// 🔍 Admin চেক (id / uid / সরাসরি স্ট্রিং — সব ফরম্যাট সাপোর্ট করে)
+function isAdmin(threadInfo, userID) {
+ const list = (threadInfo && threadInfo.adminIDs) || [];
+ return list.some(a => {
+ const id = typeof a === "object" && a !== null ? (a.id || a.uid || a.userID) : a;
+ return String(id) === String(userID);
+ });
+}
+
 module.exports.run = async function ({ api, event, args, Users }) {
  const { threadID, messageID, mentions, messageReply } = event;
  const threadInfo = await api.getThreadInfo(threadID);
- const botID = api.getCurrentUserID();
 
  const data = loadData();
  if (!data[threadID]) data[threadID] = { owners: [], temps: {} };
-
- // ❌ বট admin না হলে
- if (!threadInfo.adminIDs.some(i => i.id == botID)) {
- return api.sendMessage(
-`╔════════════════════╗
- ❌ 𝗘𝗥𝗥𝗢𝗥
-╚════════════════════╝
-
-🤖 আমি এই গ্রুপে Admin না!
-👉 আগে আমাকে Admin বানাও`,
- threadID, messageID
- );
- }
 
  let targetID;
  let time = parseInt(args[1]);
 
  // 🎯 ইউজার সিলেক্ট
  if (messageReply) targetID = messageReply.senderID;
- else if (Object.keys(mentions).length > 0) targetID = Object.keys(mentions)[0];
+ else if (mentions && Object.keys(mentions).length > 0) {
+ targetID = Object.keys(mentions)[0];
+ time = parseInt(args[args.length - 1]);
+ }
  else if (args[0]) targetID = args[0];
  else {
  return api.sendMessage(
 `╔════════════════════╗
- ⚠️ ইউজার পাওয়া যায়নি
+ ⚠️ ইউজার পাওয়া যায়নি
 ╚════════════════════╝
 
 📌 কাউকে Reply / Mention / UID দাও`,
@@ -65,9 +67,11 @@ module.exports.run = async function ({ api, event, args, Users }) {
  );
  }
 
+ targetID = String(targetID);
+
  try {
  // ⚠️ Already admin
- if (threadInfo.adminIDs.some(i => i.id == targetID)) {
+ if (isAdmin(threadInfo, targetID)) {
  return api.sendMessage(
 `╔════════════════════╗
  ⚠️ আগে থেকেই Admin
@@ -78,7 +82,7 @@ module.exports.run = async function ({ api, event, args, Users }) {
  );
  }
 
- // 🚀 Admin বানানো
+ // 🚀 Admin বানানো (বট admin না হলে এখানেই error আসবে)
  await api.changeAdminStatus(threadID, targetID, true);
 
  const name = await Users.getNameUser(targetID);
@@ -96,10 +100,16 @@ module.exports.run = async function ({ api, event, args, Users }) {
  setTimeout(async () => {
  try {
  const newInfo = await api.getThreadInfo(threadID);
- if (newInfo.adminIDs.some(i => i.id == targetID)) {
+ if (isAdmin(newInfo, targetID)) {
+ const d = loadData();
+ if (d[threadID]) {
+ d[threadID].owners = d[threadID].owners.filter(i => i !== targetID);
+ delete d[threadID].temps[targetID];
+ saveData(d);
+ }
  await api.changeAdminStatus(threadID, targetID, false);
  api.sendMessage(
-`⏱️ সময় শেষ!
+`⏱️ সময় শেষ!
 
 👤 ${name} এখন আর Admin না`,
  threadID
@@ -115,7 +125,7 @@ module.exports.run = async function ({ api, event, args, Users }) {
  api.sendMessage(
 `🎉 অভিনন্দন!
 
-আপনাকে একটি গ্রুপে Admin বানানো হয়েছে ✅`,
+আপনাকে একটি গ্রুপে Admin বানানো হয়েছে ✅`,
  targetID
  );
 
@@ -130,7 +140,7 @@ module.exports.run = async function ({ api, event, args, Users }) {
 👤 নাম: ${name}
 🆔 UID: ${targetID}
 
-${!isNaN(time) ? `⏱️ সময়: ${time} ঘন্টা` : "🔒 স্থায়ী Admin"}
+${!isNaN(time) ? `⏱️ সময়: ${time} ঘন্টা` : "🔒 স্থায়ী Admin"}
 
 🛡️ Protected System চালু`,
  threadID,
@@ -138,12 +148,14 @@ ${!isNaN(time) ? `⏱️ সময়: ${time} ঘন্টা` : "🔒 স্থ�
  );
 
  } catch (e) {
+ console.log("[ADMIN ERROR]", e);
  return api.sendMessage(
 `╔════════════════════╗
  ❌ ব্যর্থ
 ╚════════════════════╝
 
-⚠️ Admin করতে সমস্যা হয়েছে!`,
+⚠️ Admin করতে সমস্যা হয়েছে!
+👉 নিশ্চিত হও বট গ্রুপে Admin আছে এবং UID সঠিক`,
  threadID,
  messageID
  );
@@ -160,7 +172,7 @@ module.exports.handleEvent = async function ({ api, event }) {
  if (!data[threadID]) return;
 
  const removed = logMessageData.ADMIN_EVENT == "remove_admin";
- const targetID = logMessageData.TARGET_ID;
+ const targetID = String(logMessageData.TARGET_ID);
 
  // 🔒 Protected admin remove হলে auto add
  if (removed && data[threadID].owners.includes(targetID)) {
@@ -172,7 +184,7 @@ module.exports.handleEvent = async function ({ api, event }) {
 ╚════════════════════╝
 
 ❌ Protected Admin remove করা যাবে না!
-✅ আবার Admin করে দেওয়া হয়েছে`,
+✅ আবার Admin করে দেওয়া হয়েছে`,
  threadID
  );
  } catch {}
