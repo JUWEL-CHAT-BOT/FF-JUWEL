@@ -14,9 +14,19 @@ function addLog(entry) {
   saveLog(data);
 }
 
+// config.json থেকে অ্যাডমিন লিস্ট পড়ে (ADMINBOT)
+function getAdmins() {
+  const list = (global.config && global.config.ADMINBOT) || [];
+  return list.map(String);
+}
+
+function isAdmin(uid) {
+  return getAdmins().includes(String(uid));
+}
+
 module.exports.config = {
   name: "join",
-  version: "6.0.0",
+  version: "6.1.0",
   hasPermssion: 2,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "JOIN GROUPS WHERE BOT IS BUT YOU ARE NOT",
@@ -25,9 +35,6 @@ module.exports.config = {
 };
 
 let autoMode = false;
-
-// 🔥 আপনার নিজের UID এখানে বসান
-const ADMIN_UID = "61594400795920";
 
 module.exports.onLoad = () => {
   console.log(chalk.hex("#00ff99")("🚀 JOIN SYSTEM LOADED"));
@@ -39,6 +46,7 @@ module.exports.handleReply = async function ({ api, event, handleReply }) {
   const { ID, author } = handleReply;
 
   if (senderID != author) return;
+  if (!isAdmin(senderID)) return;
 
   const input = (body || "").trim().toLowerCase();
   let selected = [];
@@ -54,8 +62,6 @@ module.exports.handleReply = async function ({ api, event, handleReply }) {
   if (selected.length === 0)
     return api.sendMessage("❌ Invalid input", threadID);
 
-  const botID = api.getCurrentUserID();
-
   let result = {
     added: 0,
     already: 0,
@@ -69,13 +75,12 @@ module.exports.handleReply = async function ({ api, event, handleReply }) {
     let groupName = "Unknown Group";
 
     try {
-      // গ্রুপের নাম বের করার চেষ্টা
       try {
         const info = await api.getThreadInfo(tid);
         groupName = info.name || groupName;
 
-        // 🔥 চেক: আপনি already আছেন কিনা
-        if (info.participantIDs && info.participantIDs.includes(ADMIN_UID)) {
+        // যে অ্যাডমিন reply করেছে সে already আছে কিনা
+        if (info.participantIDs && info.participantIDs.map(String).includes(String(senderID))) {
           result.already++;
           result.details.push(`⚠️ Already You Joined → ${groupName}`);
           addLog({
@@ -89,20 +94,19 @@ module.exports.handleReply = async function ({ api, event, handleReply }) {
         }
       } catch {}
 
-      // 🔥 আপনাকে (ADMIN_UID) গ্রুপে add করা
+      // যে অ্যাডমিন কমান্ড দিয়েছে তাকেই গ্রুপে add করা
       let success = false;
       let lastError = "";
 
       for (let r = 0; r < 3; r++) {
         try {
-          await api.addUserToGroup(ADMIN_UID, tid);
+          await api.addUserToGroup(senderID, tid);
           success = true;
           result.retry += r;
           break;
         } catch (err) {
           lastError = (err?.error || err?.message || JSON.stringify(err) || "").toLowerCase();
 
-          // already member হলে success ধরে নাও
           if (lastError.includes("already") || lastError.includes("exists")) {
             success = true;
             break;
@@ -159,22 +163,22 @@ ${result.details.join("\n") || "No Data"}`,
 module.exports.run = async function ({ api, event }) {
   const { threadID, senderID, messageID } = event;
 
-  if (senderID !== ADMIN_UID)
-    return api.sendMessage("⚠️ Only Admin can use this command", threadID);
+  // config.json এর ADMINBOT চেক
+  if (!isAdmin(senderID))
+    return api.sendMessage("⚠️ Only Admin can use this command", threadID, messageID);
 
-  const botID = api.getCurrentUserID();
+  const botID = String(api.getCurrentUserID());
 
-  // 🔥 200 টা thread নাও, শুধু INBOX (bot আছে যেগুলোতে)
   let inbox = await api.getThreadList(200, null, ["INBOX"]);
 
-  // 🔥 ফিল্টার: bot আছে, কিন্তু আপনি (ADMIN_UID) নেই
+  // ফিল্টার: bot আছে, কিন্তু কমান্ড দেওয়া অ্যাডমিন নেই
   let groups = inbox.filter(t =>
     t.isGroup &&
     t.threadID &&
     t.name &&
     t.participantIDs &&
-    t.participantIDs.includes(botID) &&        // bot আছে
-    !t.participantIDs.includes(ADMIN_UID)      // আপনি নেই
+    t.participantIDs.map(String).includes(botID) &&
+    !t.participantIDs.map(String).includes(String(senderID))
   );
 
   if (groups.length === 0)
@@ -212,6 +216,8 @@ module.exports.run = async function ({ api, event }) {
 
 // ---------------- AUTO MODE ----------------
 module.exports.handleEvent = async function ({ api, event }) {
+  if (!isAdmin(event.senderID)) return;
+
   const body = (event.body || "").toLowerCase();
 
   if (body === "auto on") {
