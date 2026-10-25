@@ -14,10 +14,14 @@
  *   ৩) সেশন ফিরে এলে Telegram/Discord + মেসেঞ্জার অ্যাডমিনদের "আবার অনলাইন" জানায়।
  *   ৪) বটের লগে FATAL / session dead / login failed দেখলে সেটাও হিসেবে ধরে।
  *   ৫) বট বন্ধ হলে Telegram/Discord-এ "STOPPED" নোটিশ — কত দিন/ঘণ্টা/মিনিট/সেকেন্ড চালু ছিল সহ।
- *      [ফিক্স] এখন দুই স্তরে কাজ করে:
- *        • স্তর ১: বট নিজে (process.exit, Ctrl+C, SIGTERM, SIGHUP) — আগের মতো
- *        • স্তর ২: আলাদা WATCHDOG প্রসেস — বট ক্র্যাশ / kill -9 / OOM / হোস্ট বন্ধ করলেও
- *                  সেই প্রসেস বট মরেছে টের পেয়ে Telegram/Discord-এ নোটিশ পাঠায়।
+ *      দুই স্তরে কাজ করে:
+ *        • স্তর ১: বট নিজে (process.exit, Ctrl+C, SIGTERM, SIGHUP)
+ *        • স্তর ২: আলাদা WATCHDOG প্রসেস — বট ক্র্যাশ / kill -9 / OOM হলেও নোটিশ পাঠায়।
+ *      [ফিক্স ১] ওয়াচডগ এখন SIGINT/SIGTERM/SIGHUP উপেক্ষা করে, তাই pm2/systemd/Docker stop
+ *                দিলে বটের সাথে ওয়াচডগ মরে যায় না — নোটিশ পাঠিয়ে তারপর নিজে বন্ধ হয়।
+ *      [ফিক্স ২] ঐচ্ছিক বাইরের হার্টবিট (healthchecks.io) — হোস্ট পুরো কন্টেইনার মেরে
+ *                ফেললেও বাইরের সার্ভিস থেকে Telegram-এ নোটিশ আসবে।
+ *                env: JUWEL_HEARTBEAT_URL=https://hc-ping.com/xxxx-xxxx
  *      watchdog বন্ধ রাখতে env: JUWEL_WATCHDOG=off
  *
  *  কমান্ড:  #juwelalert        (সেশনের অবস্থা দেখায়, শুধু বট-অ্যাডমিন)
@@ -198,11 +202,19 @@ function watchSend(line) {
   } catch (_) {}
 }
 
+// [ফিক্স ২] বাইরের হার্টবিট সার্ভিসকে সাথে সাথে "ফেল" জানায়
+function heartbeatFail() {
+  const HB = process.env.JUWEL_HEARTBEAT_URL;
+  if (!HB) return;
+  try { axios.get(HB.replace(/\/$/, "") + "/fail", { timeout: 5000 }).catch(() => {}); } catch (_) {}
+}
+
 // একবারই পাঠায়; একই promise ফেরত দেয় যাতে exit তার জন্য অপেক্ষা করতে পারে
 function sendStopNotice(reason) {
   if (stopPromise) return stopPromise;
   log("বট বন্ধ হচ্ছে: " + reason, "warn");
   watchSend("REASON:" + reason); // পাঠানো ব্যর্থ হলে ওয়াচডগ এই কারণসহ আবার চেষ্টা করবে
+  heartbeatFail();
   stopPromise = Promise.race([
     sendExternal(stopText(reason)).then((ok) => { if (ok) watchSend("SENT"); return ok; }).catch(() => false),
     new Promise((res) => setTimeout(res, STOP_NOTICE_WAIT_MS))
@@ -239,6 +251,7 @@ function installShutdownHook() {
   try {
     process.on("uncaughtExceptionMonitor", (err) => {
       watchSend("REASON:ক্র্যাশ — " + String((err && (err.stack || err.message)) || err).split("\n")[0].slice(0, 200));
+      heartbeatFail();
     });
   } catch (_) {}
 
@@ -272,6 +285,12 @@ function startWatchdog() {
 
 // ওয়াচডগ প্রসেসের ভেতরের কাজ
 function runWatcher() {
+  // [ফিক্স ১] pm2/systemd/Docker stop-এ পুরো প্রসেস-ট্রি-তে সিগন্যাল যায়।
+  // ওয়াচডগ সেগুলো উপেক্ষা করে বেঁচে থাকে, যাতে বট মরার পর নোটিশ পাঠাতে পারে।
+  ["SIGINT", "SIGTERM", "SIGHUP"].forEach((s) => { try { process.on(s, () => {}); } catch (_) {} });
+  try { process.on("uncaughtException", () => {}); } catch (_) {}
+  try { process.on("unhandledRejection", () => {}); } catch (_) {}
+
   const parentPid = Number(process.env.JW_PID) || 0;
   const startMs = Number(process.env.JW_START) || Date.now();
   let reason = "", exitCode = null, handled = false, finishing = false, buf = "";
@@ -392,6 +411,18 @@ function probe() {
   }
 }
 
+/* ───────────── heartbeat (ঐচ্ছিক, বাইরের মনিটর) ───────────── */
+function startHeartbeat() {
+  const HB = process.env.JUWEL_HEARTBEAT_URL;
+  if (!HB || global.__juwelAlertHeartbeat) return;
+  global.__juwelAlertHeartbeat = true;
+  const ping = () => { try { axios.get(HB, { timeout: 10000 }).catch(() => {}); } catch (_) {} };
+  ping();
+  const h = setInterval(ping, 60 * 1000);
+  if (h.unref) h.unref();
+  log("heartbeat চালু — বাইরের মনিটরে প্রতি ৬০ সেকেন্ডে ping যাবে।", "success");
+}
+
 /* ───────────── boot ───────────── */
 function start() {
   if (state.started) return;
@@ -399,6 +430,7 @@ function start() {
   installLogWatcher();
   installShutdownHook();
   startWatchdog();
+  startHeartbeat();
   const t = setInterval(probe, PROBE_EVERY_MS);
   if (t.unref) t.unref();
 
@@ -428,6 +460,7 @@ function healthText() {
   const tg = process.env.JUWEL_TG_TOKEN && process.env.JUWEL_TG_CHAT ? "ON ✅" : "OFF ❌";
   const dc = process.env.JUWEL_DISCORD_WEBHOOK ? "ON ✅" : "OFF ❌";
   const wd = global.__juwelAlertWatcher ? "ON ✅" : "OFF ❌";
+  const hb = process.env.JUWEL_HEARTBEAT_URL ? "ON ✅" : "OFF ❌";
   const ram = Math.round(process.memoryUsage().rss / 1048576);
   const cmds = global.client && global.client.commands ? global.client.commands.size : "?";
   let started;
@@ -452,7 +485,8 @@ function healthText() {
     "📡 ALERT CHANNELS\n" +
     " ┌ TELEGRAM ➤ " + tg + "\n" +
     " ├ DISCORD ➤ " + dc + "\n" +
-    " └ WATCHDOG ➤ " + wd + "\n" + LINE + "\n" +
+    " ├ WATCHDOG ➤ " + wd + "\n" +
+    " └ HEARTBEAT ➤ " + hb + "\n" + LINE + "\n" +
     "💾 RAM ➤ " + ram + " MB\n" +
     "⚙️ COMMANDS ➤ " + cmds
   );
@@ -482,6 +516,7 @@ function testText() {
   const tg = process.env.JUWEL_TG_TOKEN && process.env.JUWEL_TG_CHAT ? "CONNECTED ✅" : "NOT SET ❌";
   const dc = process.env.JUWEL_DISCORD_WEBHOOK ? "CONNECTED ✅" : "NOT SET ❌";
   const wd = global.__juwelAlertWatcher ? "ACTIVE ✅" : "OFF ❌";
+  const hb = process.env.JUWEL_HEARTBEAT_URL ? "ACTIVE ✅" : "NOT SET ⚪";
   const cmds = global.client && global.client.commands ? global.client.commands.size : "?";
   return (
     HEAD("🧪 JUWEL ALERT • TEST") + "\n\n" +
@@ -490,7 +525,8 @@ function testText() {
     "📡 ALERT CHANNELS\n" +
     " ┌ ✈️ TELEGRAM ➤ " + tg + "\n" +
     " ├ 💬 DISCORD ➤ " + dc + "\n" +
-    " └ 🐕 WATCHDOG ➤ " + wd + "\n" + LINE + "\n" +
+    " ├ 🐕 WATCHDOG ➤ " + wd + "\n" +
+    " └ 💓 HEARTBEAT ➤ " + hb + "\n" + LINE + "\n" +
     "🔔 আপনি যা যা জানতে পারবেন\n" +
     " ┌ 🟢 বট চালু হলে\n" +
     " ├ 🔴 বট বন্ধ হলে (ক্র্যাশ সহ)\n" +
@@ -523,13 +559,13 @@ function testResultText(ok) {
 }
 
 // কার্ড = ফন্ট-রূপান্তরিত টেক্সট + (রূপান্তরহীন) ক্রেডিট লাইন
-const withCredit =(t) => fx(t) + "\n" + LINE + "\n✨ Credit ➤ " + CREDIT;
+const withCredit = (t) => fx(t) + "\n" + LINE + "\n✨ Credit ➤ " + CREDIT;
 
 /* ───────────── command ───────────── */
 module.exports.config = {
   name: "juwelalert",
   aliases: ["jalert"],
-  version: "1.3.1",
+  version: "1.4.0",
   hasPermssion: 2,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "সেশন সতর্কতা ও বট চালু/বন্ধ নোটিশ",
@@ -563,4 +599,4 @@ if (IS_WATCHER) {
 } else {
   // ফাইল লোড হওয়ার সাথে সাথেই চালু — onLoad/handleEvent না চললেও নজরদারি ও চালু-নোটিশ কাজ করবে
   try { start(); } catch (e) { log("start ত্রুটি: " + e.message, "error"); }
-      }
+    }
