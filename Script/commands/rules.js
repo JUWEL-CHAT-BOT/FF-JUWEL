@@ -7,7 +7,7 @@ const dataPath = path.join(__dirname, "rules_data.json");
 let lastSent = {};
 try {
   if (fs.existsSync(dataPath)) {
-    lastSent = JSON.parse(fs.readFileSync(dataPath, "utf8"));
+    lastSent = JSON.parse(fs.readFileSync(dataPath, "utf8")) || {};
   }
 } catch (e) {
   lastSent = {};
@@ -24,7 +24,7 @@ function saveData() {
 
 module.exports.config = {
   name: "rules",
-  version: "9.0.0",
+  version: "9.1.0",
   hasPermssion: 0,
   credits: "𝐌𝐑 𝐉𝐔𝐖𝐄𝐋",
   description: "Auto + Command rules with all admins (name + FB link)",
@@ -33,21 +33,40 @@ module.exports.config = {
   cooldowns: 5
 };
 
+// 🔰 SAFE NAME GETTER
+async function getName(Users, id) {
+  try {
+    const n = await Users.getNameUser(id);
+    return n || "Facebook User";
+  } catch (e) {
+    return "Facebook User";
+  }
+}
+
 // 🔰 MESSAGE BUILDER
-async function buildMessage(api, event, Users) {
-  const threadInfo = await api.getThreadInfo(event.threadID);
+async function buildMessage(api, event, Users, Threads) {
+  // থ্রেড ইনফো আনা (ফেইল করলে Threads ডাটাবেস থেকে নেবে)
+  let threadInfo = {};
+  try {
+    threadInfo = (await api.getThreadInfo(event.threadID)) || {};
+  } catch (e) {
+    console.log("RULES getThreadInfo FAIL:", e && e.message ? e.message : e);
+    try {
+      if (Threads && Threads.getData) {
+        const d = await Threads.getData(event.threadID);
+        threadInfo = (d && d.threadInfo) || {};
+      }
+    } catch (_) {}
+  }
+
   const threadName = threadInfo.threadName || "Unknown Group";
   const adminIDs = threadInfo.adminIDs || [];
 
   // 🔰 সব গ্রুপ এডমিনের নাম + ফেসবুক লিংক
-  const names = await Promise.all(
-    adminIDs.map(a =>
-      Users.getNameUser(a.id).catch(() => "Facebook User")
-    )
-  );
+  const names = await Promise.all(adminIDs.map(a => getName(Users, a.id)));
 
   let adminText = "";
-  let mentions = [];
+  const mentions = [];
 
   adminIDs.forEach((admin, i) => {
     adminText += `➤ ${names[i]}\n🔗 https://www.facebook.com/${admin.id}\n\n`;
@@ -60,10 +79,8 @@ async function buildMessage(api, event, Users) {
   if (!adminText) adminText = "কোনো এডমিন পাওয়া যায়নি\n";
 
   // 🔰 BOT ADMIN (config.json এর প্রথম ADMINBOT UID)
-  const botAdminUID = String((global.config.ADMINBOT || [])[0] || "");
-  const botAdminName = botAdminUID
-    ? await Users.getNameUser(botAdminUID).catch(() => "Facebook User")
-    : "Not Found";
+  const botAdminUID = String(((global.config && global.config.ADMINBOT) || [])[0] || "");
+  const botAdminName = botAdminUID ? await getName(Users, botAdminUID) : "Not Found";
   const botAdminLink = botAdminUID
     ? `https://www.facebook.com/${botAdminUID}`
     : "লিংক পাওয়া যায়নি";
@@ -133,9 +150,9 @@ ${adminText}╚═════════════════════�
 }
 
 // 🔰 COMMAND
-module.exports.run = async ({ api, event, Users }) => {
+module.exports.run = async ({ api, event, Users, Threads }) => {
   try {
-    const { msg, mentions } = await buildMessage(api, event, Users);
+    const { msg, mentions } = await buildMessage(api, event, Users, Threads);
 
     return api.sendMessage(
       { body: msg, mentions: mentions },
@@ -144,12 +161,16 @@ module.exports.run = async ({ api, event, Users }) => {
     );
   } catch (e) {
     console.log("RULES RUN ERROR:", e);
-    return api.sendMessage("❌ রুলস লোড করতে সমস্যা হয়েছে!", event.threadID, event.messageID);
+    return api.sendMessage(
+      "❌ রুলস লোড করতে সমস্যা হয়েছে!\n" + (e && e.message ? e.message : ""),
+      event.threadID,
+      event.messageID
+    );
   }
 };
 
 // 🔰 AUTO SYSTEM (বিকাল ৪:০০ - ৪:০৫, বাংলাদেশ সময়)
-module.exports.handleEvent = async ({ api, event, Users }) => {
+module.exports.handleEvent = async ({ api, event, Users, Threads }) => {
   try {
     if (!event.body) return;
 
@@ -174,7 +195,7 @@ module.exports.handleEvent = async ({ api, event, Users }) => {
       }
       saveData();
 
-      const { msg, mentions } = await buildMessage(api, event, Users);
+      const { msg, mentions } = await buildMessage(api, event, Users, Threads);
 
       api.sendMessage({ body: msg, mentions: mentions }, threadID);
     }
