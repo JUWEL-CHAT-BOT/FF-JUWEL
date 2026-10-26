@@ -7,30 +7,6 @@
  *  v1.6.0 — প্রতিটি নোটিশে বটের নাম, অ্যাডমিনের নাম ও প্রথম অ্যাডমিন UID (config.json থেকে)।
  *  v1.5.0 — ফেসবুক আইডি লক/লগআউট হয়ে বট বন্ধ হলেও নোটিশ যাবে।
  *
- *  ⚠️ সবচেয়ে জরুরি (একবারের কাজ):
- *  আপনার বটের যে মূল ফাইলে login চলে (যেমন Priyansh.js / main.js / index.js),
- *  তার একদম উপরে এই লাইন বসান (পাথ নিজের ফোল্ডার অনুযায়ী):
- *
- *      require("./modules/commands/juwelalert.js");
- *
- *  কেন? কমান্ড ফাইল লোড হয় লগইন সফল হওয়ার পরে। আইডি লক হলে লগইনেই বট
- *  মরে যায়, তখন এই ফাইল লোডই হয় না — তাই কোনো নোটিশ যেত না।
- *  উপরের লাইন দিলে ফাইল লগইনের আগেই চালু হয়, ওয়াচডগও আগেই চালু হয়।
- *
- *  (বিকল্প: `node -r ./modules/commands/juwelalert.js Priyansh.js` দিয়ে চালান।)
- *
- *  কী করে:
- *   ১) বট চালু (এবং লগইন সফল) হলে Telegram/Discord + মেসেঞ্জার অ্যাডমিনদের "চালু" নোটিশ।
- *   ২) সেশন মরলে / লক হলে / লগইন ব্যর্থ হলে সাথে সাথে সতর্কতা (লগ দেখে তাৎক্ষণিক)।
- *   ৩) লগইন ৩ মিনিটের মধ্যে সম্পন্ন না হলে সতর্কতা।
- *   ৪) সেশন ফিরলে "আবার অনলাইন" নোটিশ।
- *   ৫) বট যেকোনো কারণে বন্ধ হলে "STOPPED" নোটিশ — কত সময় চালু ছিল সহ:
- *        • স্তর ১: বট নিজে (process.exit, Ctrl+C, SIGTERM, SIGHUP, ইভেন্ট লুপ খালি হওয়া)
- *        • স্তর ২: আলাদা WATCHDOG প্রসেস — ক্র্যাশ / kill -9 / OOM হলেও ~১-২ সেকেন্ডে নোটিশ।
- *        • স্তর ৩ (ঐচ্ছিক): বাইরের হার্টবিট (healthchecks.io) — পুরো কন্টেইনার মরলেও।
- *            env: JUWEL_HEARTBEAT_URL=https://hc-ping.com/xxxx-xxxx
- *   ওয়াচডগ বন্ধ রাখতে env: JUWEL_WATCHDOG=off
- *
  *  সেটিংস: config.json-এর "JUWEL_ALERT" অংশ (TG_TOKEN, TG_CHAT, DISCORD_WEBHOOK, HEARTBEAT_URL)
  *  অথবা env: JUWEL_TG_TOKEN, JUWEL_TG_CHAT (Telegram) | JUWEL_DISCORD_WEBHOOK (Discord) — env আগে
  *
@@ -45,12 +21,7 @@ if (!IS_WATCHER) { try { console.log("[JuwelAlert] ফাইল লোড হয
 
 const axios = require("axios");
 
-/* ───────────── config.json থেকে সেটিংস ─────────────
- * config.json-এ এভাবে বসান (env দেওয়া থাকলে env-ই আগে কাজ করবে):
- *   "JUWEL_ALERT": { "TG_TOKEN": "...", "TG_CHAT": "...", "DISCORD_WEBHOOK": "", "HEARTBEAT_URL": "" }
- * ফাইলটা লগইনের আগে এবং ওয়াচডগ প্রসেসেও চলে, তাই global.config-এর ওপর নির্ভর না করে
- * সরাসরি config.json পড়া হয়; ওয়াচডগ spawn-এর সময় process.env কপি হয়ে যায়।
- */
+/* ───────────── config.json থেকে সেটিংস ───────────── */
 (function loadAlertSettings() {
   try {
     const fs = require("fs"), path = require("path");
@@ -737,4 +708,4 @@ if (IS_WATCHER) {
 } else {
   // ফাইল লোড হওয়ার সাথে সাথেই চালু — onLoad/handleEvent না চললেও নজরদারি কাজ করবে
   try { start(); } catch (e) { log("start ত্রুটি: " + e.message, "error"); }
-}
+    }
