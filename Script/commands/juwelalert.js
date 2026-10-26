@@ -4,6 +4,8 @@
  *  Credit : 乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐
  * ╚══════════════════════════════════════════════════════════╝
  *
+ *  v1.7.0 — আইডি লক/সেশন সমস্যার নোটিশ একবারই, বট বন্ধের নোটিশও একবারই (রিস্টার্টেও বারবার যাবে না)।
+ *           টানা ৫ মিনিট সুস্থ থাকলে তবেই লক খোলে এবং একবার "BACK ONLINE" যায়।
  *  v1.6.0 — প্রতিটি নোটিশে বটের নাম, অ্যাডমিনের নাম ও প্রথম অ্যাডমিন UID (config.json থেকে)।
  *  v1.5.0 — ফেসবুক আইডি লক/লগআউট হয়ে বট বন্ধ হলেও নোটিশ যাবে।
  *
@@ -37,11 +39,33 @@ const axios = require("axios");
 })();
 
 const PROBE_EVERY_MS = Number(process.env.JUWEL_PROBE_MS) || 2 * 60 * 1000;
-const ALERT_COOLDOWN_MS = 30 * 60 * 1000;
 const PROBE_FAILS_BEFORE_ALERT = 2;
 const BOOT_NOTICE_DELAY_MS = Number(process.env.JUWEL_BOOT_MS) || 20 * 1000;
 const LOGIN_GRACE_MS = Number(process.env.JUWEL_LOGIN_GRACE_MS) || 3 * 60 * 1000; // এর মধ্যে লগইন না হলে সতর্কতা
 const STOP_NOTICE_WAIT_MS = 6000; // বন্ধ হওয়ার আগে নোটিশ পাঠাতে সর্বোচ্চ এত সময় অপেক্ষা
+const RECOVER_STABLE_MS = Number(process.env.JUWEL_RECOVER_MS) || 5 * 60 * 1000; // এতক্ষণ টানা সুস্থ থাকলে তবেই "ফিরে এসেছে"
+const EPISODE_MAX_MS = 6 * 60 * 60 * 1000; // নিরাপত্তা: ৬ ঘণ্টা পর লক নিজে খুলে যাবে
+
+/* ───────────── একবারই-পাঠানো লক (ফাইলে থাকে, রিস্টার্টেও টিকে) ───────────── */
+const LATCH_FILE = require("path").join(__dirname, "..", "..", "juwelalert.latch.json");
+function latchRead() {
+  try { return JSON.parse(require("fs").readFileSync(LATCH_FILE, "utf8")) || {}; }
+  catch (_) { return {}; }
+}
+function latchWrite(o) {
+  try { require("fs").writeFileSync(LATCH_FILE, JSON.stringify(o)); } catch (_) {}
+}
+// key: "alert" (লক/সেশন সমস্যা) | "stop" (বট বন্ধ)
+function canSend(key) {
+  const t = latchRead()[key];
+  return !(t && Date.now() - t < EPISODE_MAX_MS);
+}
+function markSent(key) {
+  const o = latchRead();
+  o[key] = Date.now();
+  latchWrite(o);
+}
+function clearLatch() { latchWrite({}); }
 
 const state = global.__juwelAlert || (global.__juwelAlert = {
   started: false,
@@ -54,6 +78,8 @@ const state = global.__juwelAlert || (global.__juwelAlert = {
   lastProbeOk: null,
   lastProbeAt: 0,
   lastAlertAt: 0,
+  alertSending: false,
+  okSince: 0,
   down: false,
   downSince: 0,
   bootNoticeSent: false
@@ -154,10 +180,14 @@ async function sendMessengerToAdmins(text) {
 const HEAD = (title) => "╔══════════════════╗\n   " + title + "\n╚══════════════════╝";
 const LINE = "━━━━━━━━━━━━━━━━━━━━";
 
+// লক/সেশন সমস্যার নোটিশ — একটা সমস্যায় মাত্র একবার (রিস্টার্ট হলেও)
 async function raiseAlert(reason) {
   const now = Date.now();
   if (!state.down) { state.down = true; state.downSince = now; }
-  if (now - state.lastAlertAt < ALERT_COOLDOWN_MS) return;
+  if (!canSend("alert")) return; // আগেই একবার গেছে → আর নয়
+  // পাঠানো চলছে, বা আগের চেষ্টা ব্যর্থ হয়ে থাকলে ১ মিনিটের আগে আবার নয়
+  if (state.alertSending || now - state.lastAlertAt < 60 * 1000) return;
+  state.alertSending = true;
   state.lastAlertAt = now;
   const text =
     HEAD("🚨 JUWEL BOT • ALERT") + "\n\n" +
@@ -166,14 +196,23 @@ async function raiseAlert(reason) {
     "🕒 TIME ➤ " + dhakaTime() + "\n" + LINE + "\n" +
     "🛠 করণীয়: নতুন appstate.json (কুকি) বসিয়ে বট রিস্টার্ট দিন।";
   log("সতর্কতা: " + reason, "error");
-  await sendExternal(text);
+  try {
+    const ok = await sendExternal(text);
+    if (ok) markSent("alert");
+  } finally { state.alertSending = false; }
 }
 
+// সমস্যা মিটে টানা ৫ মিনিট সুস্থ থাকলে একবার "BACK ONLINE" + লক খুলে দেয়
 async function raiseRecovery() {
-  if (!state.down) return;
-  const downFor = Date.now() - state.downSince;
+  const hadAlert = state.down || !canSend("alert");
+  const o = latchRead();
+  const ts = Object.values(o).filter(Boolean);
+  const since = state.downSince || (ts.length ? Math.min.apply(null, ts) : Date.now());
+  const downFor = Date.now() - since;
+  clearLatch(); // নতুন সমস্যা হলে আবার একবার নোটিশ যাবে
   state.down = false; state.downSince = 0; state.probeFails = 0; state.lastAlertAt = 0;
-  state.lockAt = 0; state.lockReason = "";
+  state.lockAt = 0; state.lockReason = ""; state.okSince = 0;
+  if (!hadAlert) return; // শুধু সাধারণ বন্ধ/চালু হলে আলাদা "ফিরে এসেছে" নোটিশ নয়
   const text =
     HEAD("✅ JUWEL BOT • BACK ONLINE") + "\n\n" +
     "🟢 STATUS ➤ ONLINE\n" + LINE + "\n" +
@@ -238,8 +277,14 @@ function sendStopNotice(reason) {
   log("বট বন্ধ হচ্ছে: " + reason, "warn");
   watchSend("REASON:" + reason);
   heartbeatFail();
+  // এই সমস্যায় আগেই একবার STOPPED গেছে → আর পাঠাবে না (ওয়াচডগকেও জানিয়ে দেয়)
+  if (!canSend("stop")) {
+    watchSend("SENT");
+    stopPromise = Promise.resolve(false);
+    return stopPromise;
+  }
   stopPromise = Promise.race([
-    sendExternal(stopText(reason)).then((ok) => { if (ok) watchSend("SENT"); return ok; }).catch(() => false),
+    sendExternal(stopText(reason)).then((ok) => { if (ok) { markSent("stop"); watchSend("SENT"); } return ok; }).catch(() => false),
     new Promise((res) => setTimeout(res, STOP_NOTICE_WAIT_MS))
   ]);
   return stopPromise;
@@ -352,7 +397,8 @@ function runWatcher() {
     finishing = true;
     // বট মরে গেছে, তাই আর কোনো SENT আসবে না; পাইপের বাকি ডাটা পড়ার জন্য অল্প অপেক্ষা
     await new Promise((r) => setTimeout(r, 300));
-    if (!handled) {
+    // বট নিজে পাঠায়নি এবং এই সমস্যায় আগে STOPPED যায়নি — তখনই ওয়াচডগ পাঠাবে
+    if (!handled && canSend("stop")) {
       const why = reason || crash ||
         (exitCode !== null && exitCode !== "undefined"
           ? "বট বন্ধ হয়েছে (exit code " + exitCode + ")"
@@ -362,7 +408,7 @@ function runWatcher() {
       for (let i = 0; i < 3; i++) {
         let ok = false;
         try { ok = await sendExternal(msg); } catch (_) {}
-        if (ok) break;
+        if (ok) { markSent("stop"); break; }
         await new Promise((r) => setTimeout(r, 1500));
       }
     }
@@ -390,13 +436,13 @@ const BAD_PATTERNS = [
 ];
 const GOOD_PATTERNS = [/recovered after \d+ attempt/i, /traffic resumed/i, /session established/i];
 
-// এগুলো লগে দেখলেই সাথে সাথে সতর্কতা + ওয়াচডগকে কারণ জানানো হয় (বট মরার অপেক্ষা না করে)
+// এগুলো লগে দেখলেই সতর্কতা (একবার) + ওয়াচডগকে কারণ জানানো হয় (বট মরার অপেক্ষা না করে)
 const LOCK_PATTERNS = [
   /Error retrieving userID/i,
   /login[_ ]?blocked/i,
   /checkpoint/i,
-  /account.{0,40}(locked|disabled|suspended|restricted)/i,
-  /(locked|disabled|suspended).{0,40}account/i,
+  /account.{0,40}(locked|disabled|suspended|restricted|blocked)/i,
+  /(locked|disabled|suspended|blocked).{0,40}account/i,
   /(Fresh )?login failed/i,
   /login (approval|error)/i,
   /FATAL: Session/i,
@@ -418,9 +464,10 @@ function installLogWatcher() {
             const short = line.trim().slice(0, 160);
             state.lockAt = Date.now();
             state.lockReason = short;
+            state.okSince = 0; // লক দেখা গেলে "সুস্থ থাকার" গণনা আবার শুরু
             // বট এরপর মরলে ওয়াচডগ এই কারণটাই জানাবে
             watchSend("CRASH:🔒 ফেসবুক আইডি লক/লগইন সমস্যা — " + short);
-            // বট মরুক বা না মরুক, এখনই সতর্কতা
+            // নোটিশ একবারই যাবে (raiseAlert নিজেই লক দেখে)
             raiseAlert("🔒 লক/লগইন সমস্যা ধরা পড়েছে | লগ: " + short);
           }
           if (BAD_PATTERNS.some((r) => r.test(line))) {
@@ -428,8 +475,8 @@ function installLogWatcher() {
             state.logHits.push({ t: Date.now(), line: line.trim().slice(0, 160) });
             if (state.logHits.length > 20) state.logHits.shift();
           } else if (GOOD_PATTERNS.some((r) => r.test(line))) {
+            // লগ দেখে আর "ফিরে এসেছে" নোটিশ নয় — শুধু গণনা রিসেট; রিকভারি যাচাই করে probe()
             state.lastLoginIssueAt = 0; state.logHits = []; state.probeFails = 0;
-            raiseRecovery();
           }
         }
       } catch (_) {}
@@ -440,6 +487,7 @@ function installLogWatcher() {
 
 /* ───────────── active probe ───────────── */
 function evaluate(reason) {
+  state.okSince = 0;
   const recent = state.lastLoginIssueAt && (Date.now() - state.lastLoginIssueAt < 15 * 60 * 1000);
   if (state.probeFails >= PROBE_FAILS_BEFORE_ALERT || (state.probeFails >= 1 && recent)) {
     const extra = recent && state.logHits.length ? " | লগ: " + state.logHits[state.logHits.length - 1].line : "";
@@ -455,6 +503,7 @@ function probe() {
     // লগইন চলছে — কিছুক্ষণ অপেক্ষা
     if (Date.now() - state.bootAt < LOGIN_GRACE_MS) return;
     state.probeFails++;
+    state.okSince = 0;
     return raiseAlert(withLock("লগইন সম্পন্ন হয়নি (" + fmtDur(Date.now() - state.bootAt) + " ধরে api নেই) — আইডি লক/কুকি নষ্ট হতে পারে"));
   }
   let uid;
@@ -475,7 +524,13 @@ function probe() {
         evaluate("সেশন পরীক্ষা ব্যর্থ: " + String((err && (err.error || err.message)) || err).slice(0, 120));
       } else {
         state.probeFails = 0; state.lastProbeOk = true;
-        if (state.down) raiseRecovery();
+        // সমস্যার পর টানা RECOVER_STABLE_MS সুস্থ থাকলে তবেই রিকভারি (বারবার ওঠানামায় নোটিশ যাবে না)
+        if (state.down || !canSend("alert") || !canSend("stop")) {
+          if (!state.okSince) state.okSince = Date.now();
+          const stable = Date.now() - state.okSince >= RECOVER_STABLE_MS;
+          const noRecentLock = Date.now() - (state.lockAt || 0) >= RECOVER_STABLE_MS;
+          if (stable && noRecentLock) raiseRecovery();
+        }
       }
     });
   } catch (e) {
@@ -511,6 +566,7 @@ function start() {
   // চালু-নোটিশ: লগইন সফল হওয়ার পর (api পাওয়া গেলে) পাঠায়।
   // লগইন না হলে "চালু" নোটিশ যাবে না; সেক্ষেত্রে probe() সতর্কতা দেবে।
   const sendBoot = async () => {
+    if (!canSend("alert")) return; // আইডি লক/সেশন সমস্যা চলছে — "STARTED" নোটিশ নয়
     const text =
       HEAD("🟢 JUWEL BOT • STARTED") + "\n\n" +
       "🟢 STATUS ➤ ONLINE\n" + LINE + "\n" +
@@ -615,8 +671,8 @@ function testText() {
     " └ 💓 HEARTBEAT ➤ " + hb + "\n" + LINE + "\n" +
     "🔔 আপনি যা যা জানতে পারবেন\n" +
     " ┌ 🟢 বট চালু হলে\n" +
-    " ├ 🔴 বট বন্ধ হলে (ক্র্যাশ/আইডি লক সহ)\n" +
-    " ├ 🚨 সেশন/লগইন সমস্যা হলে\n" +
+    " ├ 🔴 বট বন্ধ হলে (ক্র্যাশ/আইডি লক সহ) — একবার\n" +
+    " ├ 🚨 সেশন/লগইন সমস্যা হলে — একবার\n" +
     " └ ✅ সেশন ফিরে এলে\n" + LINE + "\n" +
     uptimeBlock() + "\n" + LINE + "\n" +
     "⚙️ COMMANDS ➤ " + cmds + "\n" +
@@ -674,7 +730,7 @@ const withCredit = (t) => fx(t) + "\n" + LINE + "\n" + infoBlock() + "\n" + LINE
 module.exports.config = {
   name: "juwelalert",
   aliases: ["jalert"],
-  version: "1.6.0",
+  version: "1.7.0",
   hasPermssion: 2,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "সেশন সতর্কতা ও বট চালু/বন্ধ নোটিশ",
@@ -708,4 +764,4 @@ if (IS_WATCHER) {
 } else {
   // ফাইল লোড হওয়ার সাথে সাথেই চালু — onLoad/handleEvent না চললেও নজরদারি কাজ করবে
   try { start(); } catch (e) { log("start ত্রুটি: " + e.message, "error"); }
-    }
+  }
