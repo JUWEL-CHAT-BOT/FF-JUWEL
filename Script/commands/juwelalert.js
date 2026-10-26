@@ -4,6 +4,7 @@
  *  Credit : 乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐
  * ╚══════════════════════════════════════════════════════════╝
  *
+ *  v1.6.0 — প্রতিটি নোটিশে বটের নাম, অ্যাডমিনের নাম ও প্রথম অ্যাডমিন UID (config.json থেকে)।
  *  v1.5.0 — ফেসবুক আইডি লক/লগআউট হয়ে বট বন্ধ হলেও নোটিশ যাবে।
  *
  *  ⚠️ সবচেয়ে জরুরি (একবারের কাজ):
@@ -30,7 +31,8 @@
  *            env: JUWEL_HEARTBEAT_URL=https://hc-ping.com/xxxx-xxxx
  *   ওয়াচডগ বন্ধ রাখতে env: JUWEL_WATCHDOG=off
  *
- *  env: JUWEL_TG_TOKEN, JUWEL_TG_CHAT (Telegram) | JUWEL_DISCORD_WEBHOOK (Discord)
+ *  সেটিংস: config.json-এর "JUWEL_ALERT" অংশ (TG_TOKEN, TG_CHAT, DISCORD_WEBHOOK, HEARTBEAT_URL)
+ *  অথবা env: JUWEL_TG_TOKEN, JUWEL_TG_CHAT (Telegram) | JUWEL_DISCORD_WEBHOOK (Discord) — env আগে
  *
  *  কমান্ড:  #juwelalert        (অবস্থা দেখায়, শুধু বট-অ্যাডমিন)
  *           #juwelalert test   (টেস্ট নোটিশ পাঠায়)
@@ -42,6 +44,26 @@ const IS_WATCHER = require.main === module && process.argv.includes("--juwel-wat
 if (!IS_WATCHER) { try { console.log("[JuwelAlert] ফাইল লোড হয়েছে (juwelalert.js)"); } catch (_) {} }
 
 const axios = require("axios");
+
+/* ───────────── config.json থেকে সেটিংস ─────────────
+ * config.json-এ এভাবে বসান (env দেওয়া থাকলে env-ই আগে কাজ করবে):
+ *   "JUWEL_ALERT": { "TG_TOKEN": "...", "TG_CHAT": "...", "DISCORD_WEBHOOK": "", "HEARTBEAT_URL": "" }
+ * ফাইলটা লগইনের আগে এবং ওয়াচডগ প্রসেসেও চলে, তাই global.config-এর ওপর নির্ভর না করে
+ * সরাসরি config.json পড়া হয়; ওয়াচডগ spawn-এর সময় process.env কপি হয়ে যায়।
+ */
+(function loadAlertSettings() {
+  try {
+    const fs = require("fs"), path = require("path");
+    const file = path.join(__dirname, "..", "..", "config.json");
+    if (!fs.existsSync(file)) return;
+    const cfg = JSON.parse(fs.readFileSync(file, "utf8")).JUWEL_ALERT || {};
+    const map = { TG_TOKEN: "JUWEL_TG_TOKEN", TG_CHAT: "JUWEL_TG_CHAT", DISCORD_WEBHOOK: "JUWEL_DISCORD_WEBHOOK", HEARTBEAT_URL: "JUWEL_HEARTBEAT_URL" };
+    Object.keys(map).forEach((k) => {
+      const v = cfg[k] === undefined || cfg[k] === null ? "" : String(cfg[k]).trim();
+      if (v && !process.env[map[k]]) process.env[map[k]] = v;
+    });
+  } catch (_) {}
+})();
 
 const PROBE_EVERY_MS = Number(process.env.JUWEL_PROBE_MS) || 2 * 60 * 1000;
 const ALERT_COOLDOWN_MS = 30 * 60 * 1000;
@@ -420,7 +442,7 @@ function installLogWatcher() {
     console[method] = function () {
       try {
         const line = stripAnsi(Array.prototype.map.call(arguments, (a) => (typeof a === "string" ? a : "")).join(" "));
-        if (line && line.length < 2000 && !/JuwelAlert/.test(line)) {
+        if (line && line.length < 2000 && !/JuwelAlert/.test(line) && line.indexOf("📩") === -1) {
           if (LOCK_PATTERNS.some((r) => r.test(line))) {
             const short = line.trim().slice(0, 160);
             state.lockAt = Date.now();
@@ -650,14 +672,38 @@ function testResultText(ok) {
   );
 }
 
-// কার্ড = ফন্ট-রূপান্তরিত টেক্সট + (রূপান্তরহীন) ক্রেডিট লাইন
-const withCredit = (t) => fx(t) + "\n" + LINE + "\n✨ Credit ➤ " + CREDIT;
+// বটের নাম / অ্যাডমিনের নাম / প্রথম অ্যাডমিন UID — config.json থেকে (লগইনের আগে ও ওয়াচডগেও কাজ করে)
+//   BOTNAME, BOTADMINNAME, ADMINBOT[0]
+let _botInfo = null;
+function botInfo() {
+  if (_botInfo) return _botInfo;
+  let c = {};
+  try {
+    const fs = require("fs"), path = require("path");
+    const file = path.join(__dirname, "..", "..", "config.json");
+    if (fs.existsSync(file)) c = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (_) {}
+  const g = global.config || {};
+  const pick = (k) => String(c[k] !== undefined && c[k] !== "" ? c[k] : (g[k] !== undefined ? g[k] : "")).trim();
+  const admins = (Array.isArray(c.ADMINBOT) && c.ADMINBOT.length ? c.ADMINBOT : g.ADMINBOT) || [];
+  const info = { name: pick("BOTNAME") || "—", admin: pick("BOTADMINNAME") || "—", uid: admins.length ? String(admins[0]) : "—" };
+  // config সম্পূর্ণ পাওয়া গেলে মনে রাখি; না পেলে পরের বার আবার চেষ্টা
+  if (c.BOTNAME || g.BOTNAME) _botInfo = info;
+  return info;
+}
+const infoBlock = () => {
+  const b = botInfo();
+  return "🤖 " + fx("BOT") + " ➤ " + b.name + "\n👑 " + fx("ADMIN") + " ➤ " + b.admin + "\n🆔 " + fx("UID") + " ➤ " + b.uid;
+};
+
+// কার্ড = ফন্ট-রূপান্তরিত টেক্সট + বট/অ্যাডমিন/UID + (রূপান্তরহীন) ক্রেডিট লাইন
+const withCredit = (t) => fx(t) + "\n" + LINE + "\n" + infoBlock() + "\n" + LINE + "\n✨ Credit ➤ " + CREDIT;
 
 /* ───────────── command ───────────── */
 module.exports.config = {
   name: "juwelalert",
   aliases: ["jalert"],
-  version: "1.5.0",
+  version: "1.6.0",
   hasPermssion: 2,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "সেশন সতর্কতা ও বট চালু/বন্ধ নোটিশ",
