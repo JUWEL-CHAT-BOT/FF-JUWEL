@@ -33,10 +33,6 @@ function pad(n) {
   return String(n).padStart(2, "0");
 }
 
-function cmdList(cmds) {
-  return cmds.map((c, i) => `【${mono(pad(i + 1))}】 ➜ ${mono(c)}`).join("\n");
-}
-
 function footer(text) {
   return `\n${THIN}\n💬 ${mono(text)}`;
 }
@@ -79,7 +75,8 @@ function listCommands() {
   return fs
     .readdirSync(COMMANDS_DIR)
     .filter((f) => f.endsWith(".js") && f !== path.basename(__filename))
-    .map((f) => f.replace(/\.js$/, ""));
+    .map((f) => f.replace(/\.js$/, ""))
+    .sort((a, b) => a.localeCompare(b));
 }
 
 function getUptime() {
@@ -333,6 +330,61 @@ async function reloadOne(file, ctx) {
   return cmd.config.name;
 }
 
+// ================= COMMAND PAGES (সব কমান্ড পেজ করে দেখানো) =================
+// মেসেঞ্জারে এক মেসেজে অনেক লম্বা টেক্সট যায় না, তাই ২০০+ কমান্ড পেজে ভাগ করে দেখানো হয়।
+// এক পেজে কয়টা কমান্ড দেখাবে (মেসেজ কেটে গেলে এই সংখ্যা কমিয়ে দিন)
+const CMD_PER_PAGE = 200;
+
+const CMD_KINDS = {
+  list: { icon: "🧩", title: "COMMAND LIST", hint: "" },
+  delete: { icon: "🗑️", title: "DELETE COMMAND", hint: "Reply with the number to delete" },
+  reload: { icon: "🔁", title: "RELOAD COMMAND", hint: "Reply with the number to reload" },
+  toggle: { icon: "🎛️", title: "COMMAND ON/OFF", hint: "Reply with the number to toggle" }
+};
+
+function cmdPageText(kind, cmds, page) {
+  const k = CMD_KINDS[kind];
+  const totalPages = Math.max(1, Math.ceil(cmds.length / CMD_PER_PAGE));
+  const start = page * CMD_PER_PAGE;
+  const slice = cmds.slice(start, start + CMD_PER_PAGE);
+  const dis = getDisabled();
+
+  const lines = slice.map((c, i) => {
+    const num = `【${mono(pad(start + i + 1))}】`;
+    if (kind === "toggle") return `${num} ${dis.includes(c) ? "🔴" : "🟢"} ${mono(c)}`;
+    return `${num} ➜ ${mono(c)}`;
+  });
+
+  // একের বেশি পেজ হলেই কেবল পেজের তথ্য ও n/p হিন্ট দেখাবে
+  let hint = k.hint;
+  if (totalPages > 1) {
+    const nav = `Page ${page + 1}/${totalPages} | n = next | p = prev`;
+    hint = hint ? `${hint} | ${nav}` : nav;
+  }
+
+  const out = [header(k.icon, k.title)];
+  if (kind === "list") out.push(`\n◈ ${mono("Total")} ➜ ${mono(cmds.length)}`, THIN, lines.join("\n"));
+  else out.push(`\n${lines.join("\n")}`);
+  if (hint) out.push(footer(hint));
+
+  return out.join("\n");
+}
+
+function sendCmdPage(api, event, kind, cmds, page) {
+  return api.sendMessage(cmdPageText(kind, cmds, page), event.threadID, (err, info) => {
+    if (err) return;
+    global.client.handleReply.push({
+      name: module.exports.config.name,
+      messageID: info.messageID,
+      author: event.senderID,
+      type: "cmdPick",
+      kind,
+      cmds,
+      page
+    });
+  });
+}
+
 // ================= GROUP ON/OFF =================
 const PER_PAGE = 10;
 
@@ -391,7 +443,7 @@ function groupPageText(groups, page) {
 // ================= CONFIG =================
 module.exports.config = {
   name: "menu",
-  version: "4.3.0",
+  version: "4.4.0",
   hasPermssion: 2,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "Pro control panel",
@@ -484,31 +536,14 @@ module.exports.handleReply = async function ({ api, event, handleReply, Threads,
         );
       }
 
-      // 🧩 COMMAND LIST
+      // 🧩 COMMAND LIST (পেজ করা)
       case "2": {
-        const cmds = listCommands();
-        return reply(
-          [header("🧩", "COMMAND LIST"), `\n◈ ${mono("Total")} ➜ ${mono(cmds.length)}`, THIN, cmdList(cmds)].join("\n")
-        );
+        return sendCmdPage(api, event, "list", listCommands(), 0);
       }
 
-      // 🗑 DELETE COMMAND
+      // 🗑 DELETE COMMAND (পেজ করা)
       case "3": {
-        const cmds = listCommands();
-
-        return reply(
-          [header("🗑️", "DELETE COMMAND"), `\n${cmdList(cmds)}`, footer("Reply with the number to delete")].join("\n"),
-          (err, info) => {
-            if (err) return;
-            global.client.handleReply.push({
-              name: module.exports.config.name,
-              messageID: info.messageID,
-              author: event.senderID,
-              type: "deletePick",
-              cmds
-            });
-          }
-        );
+        return sendCmdPage(api, event, "delete", listCommands(), 0);
       }
 
       // 🚫 BAN
@@ -596,44 +631,14 @@ module.exports.handleReply = async function ({ api, event, handleReply, Threads,
         }
       }
 
-      // 🔁 RELOAD ONE COMMAND
+      // 🔁 RELOAD ONE COMMAND (পেজ করা)
       case "8": {
-        const cmds = listCommands();
-        return reply(
-          [header("🔁", "RELOAD COMMAND"), `\n${cmdList(cmds)}`, footer("Reply with the number to reload")].join("\n"),
-          (err, info) => {
-            if (err) return;
-            global.client.handleReply.push({
-              name: module.exports.config.name,
-              messageID: info.messageID,
-              author: event.senderID,
-              type: "reloadPick",
-              cmds
-            });
-          }
-        );
+        return sendCmdPage(api, event, "reload", listCommands(), 0);
       }
 
-      // 🎛️ COMMAND ON/OFF
+      // 🎛️ COMMAND ON/OFF (পেজ করা)
       case "9": {
-        const cmds = listCommands();
-        const dis = getDisabled();
-        const lines = cmds.map(
-          (c, i) => `【${mono(pad(i + 1))}】 ${dis.includes(c) ? "🔴" : "🟢"} ${mono(c)}`
-        );
-        return reply(
-          [header("🎛️", "COMMAND ON/OFF"), `\n${lines.join("\n")}`, footer("Reply with the number to toggle")].join("\n"),
-          (err, info) => {
-            if (err) return;
-            global.client.handleReply.push({
-              name: module.exports.config.name,
-              messageID: info.messageID,
-              author: event.senderID,
-              type: "togglePick",
-              cmds
-            });
-          }
-        );
+        return sendCmdPage(api, event, "toggle", listCommands(), 0);
       }
 
       // 👥 GROUP LIST ON/OFF
@@ -659,57 +664,89 @@ module.exports.handleReply = async function ({ api, event, handleReply, Threads,
     }
   }
 
-  // ================= RELOAD PICK =================
-  if (handleReply.type === "reloadPick") {
-    const idx = parseInt(event.body, 10) - 1;
-    const list = handleReply.cmds;
-    if (isNaN(idx) || idx < 0 || idx >= list.length) return reply(`❌ ${mono("Invalid number")}`);
+  // ================= COMMAND PICK (list / delete / reload / toggle) =================
+  if (handleReply.type === "cmdPick") {
+    const body = (event.body || "").trim().toLowerCase();
+    const { kind, page } = handleReply;
+    const cmds = handleReply.cmds;
+    const totalPages = Math.max(1, Math.ceil(cmds.length / CMD_PER_PAGE));
 
-    const file = list[idx];
-    if (getDisabled().includes(file))
-      return reply(`⚠️ ${mono(file)} ${mono("is OFF. Turn it ON first.")}`);
-
-    try {
-      const name = await reloadOne(file, { api, models, Users, Threads, Currencies });
-      logAction({ action: `Reloaded command: ${file}.js`, user: event.senderID, thread: event.threadID });
-      return reply(
-        [header("✅", "RELOADED"), `\n◈ ${mono("File")} ➜ ${mono(file + ".js")}`, `◈ ${mono("Name")} ➜ ${mono(name)}`].join("\n")
-      );
-    } catch (e) {
-      return reply(`❌ ${mono("Reload failed")}: ${mono(e.message)}`);
+    // PAGING
+    if (["n", "next", "p", "prev"].includes(body)) {
+      const newPage = page + (body.startsWith("n") ? 1 : -1);
+      if (newPage < 0 || newPage >= totalPages) return reply(`❌ ${mono("No more pages")}`);
+      return sendCmdPage(api, event, kind, cmds, newPage);
     }
-  }
 
-  // ================= TOGGLE COMMAND PICK =================
-  if (handleReply.type === "togglePick") {
-    const idx = parseInt(event.body, 10) - 1;
-    const list = handleReply.cmds;
-    if (isNaN(idx) || idx < 0 || idx >= list.length) return reply(`❌ ${mono("Invalid number")}`);
+    if (kind === "list") return reply(`❌ ${mono("Reply n / p to change page")}`);
 
-    const file = list[idx];
-    if (file === "menu") return reply(`❌ ${mono("You cannot turn OFF the menu command")}`);
+    const idx = parseInt(body, 10) - 1;
+    if (isNaN(idx) || idx < 0 || idx >= cmds.length) return reply(`❌ ${mono("Invalid number")}`);
 
-    let dis = getDisabled();
+    const file = cmds[idx];
 
-    if (dis.includes(file)) {
-      // TURN ON
+    // 🗑 DELETE → কনফার্ম চাওয়া
+    if (kind === "delete") {
+      return reply(
+        [header("⚠️", "CONFIRM DELETE"), `\n◈ ${mono("File")} ➜ ${mono(file + ".js")}`, footer("Type yes or no")].join("\n"),
+        (err, info) => {
+          if (err) return;
+          global.client.handleReply.push({
+            name: module.exports.config.name,
+            messageID: info.messageID,
+            author: event.senderID,
+            type: "confirmDelete",
+            cmdName: file
+          });
+        }
+      );
+    }
+
+    // 🔁 RELOAD
+    if (kind === "reload") {
+      if (getDisabled().includes(file))
+        return reply(`⚠️ ${mono(file)} ${mono("is OFF. Turn it ON first.")}`);
+
       try {
-        await reloadOne(file, { api, models, Users, Threads, Currencies });
-        dis = dis.filter((f) => f !== file);
-        saveDisabled(dis);
-        logAction({ action: `Command ON: ${file}`, user: event.senderID, thread: event.threadID });
-        return reply(`🟢 ${mono(file)} ${mono("is now ON")}`);
+        const name = await reloadOne(file, { api, models, Users, Threads, Currencies });
+        logAction({ action: `Reloaded command: ${file}.js`, user: event.senderID, thread: event.threadID });
+        return reply(
+          [header("✅", "RELOADED"), `\n◈ ${mono("File")} ➜ ${mono(file + ".js")}`, `◈ ${mono("Name")} ➜ ${mono(name)}`].join("\n")
+        );
       } catch (e) {
-        return reply(`❌ ${mono("Failed to turn ON")}: ${mono(e.message)}`);
+        return reply(`❌ ${mono("Reload failed")}: ${mono(e.message)}`);
       }
     }
 
-    // TURN OFF
-    dis.push(file);
-    saveDisabled(dis);
-    unregisterCommand(file);
-    logAction({ action: `Command OFF: ${file}`, user: event.senderID, thread: event.threadID });
-    return reply(`🔴 ${mono(file)} ${mono("is now OFF")}`);
+    // 🎛️ TOGGLE ON/OFF
+    if (kind === "toggle") {
+      if (file === "menu") return reply(`❌ ${mono("You cannot turn OFF the menu command")}`);
+
+      let dis = getDisabled();
+      let status;
+
+      if (dis.includes(file)) {
+        // TURN ON
+        try {
+          await reloadOne(file, { api, models, Users, Threads, Currencies });
+          dis = dis.filter((f) => f !== file);
+          saveDisabled(dis);
+          logAction({ action: `Command ON: ${file}`, user: event.senderID, thread: event.threadID });
+          status = `🟢 ${mono(file)} ${mono("is now ON")}`;
+        } catch (e) {
+          return reply(`❌ ${mono("Failed to turn ON")}: ${mono(e.message)}`);
+        }
+      } else {
+        // TURN OFF
+        dis.push(file);
+        saveDisabled(dis);
+        unregisterCommand(file);
+        logAction({ action: `Command OFF: ${file}`, user: event.senderID, thread: event.threadID });
+        status = `🔴 ${mono(file)} ${mono("is now OFF")}`;
+      }
+
+      return reply(status);
+    }
   }
 
   // ================= GROUP PICK =================
@@ -754,32 +791,6 @@ module.exports.handleReply = async function ({ api, event, handleReply, Threads,
     });
 
     return reply(`${wasOff ? "🟢" : "🔴"} ${g.name} ➜ ${mono(wasOff ? "ON" : "OFF")}`);
-  }
-
-  // ================= DELETE PICK =================
-  if (handleReply.type === "deletePick") {
-    const idx = parseInt(event.body, 10) - 1;
-    const list = handleReply.cmds;
-
-    if (isNaN(idx) || idx < 0 || idx >= list.length)
-      return api.sendMessage(`❌ ${mono("Invalid number")}`, event.threadID);
-
-    const name = list[idx];
-
-    return api.sendMessage(
-      [header("⚠️", "CONFIRM DELETE"), `\n◈ ${mono("File")} ➜ ${mono(name + ".js")}`, footer("Type yes or no")].join("\n"),
-      event.threadID,
-      (err, info) => {
-        if (err) return;
-        global.client.handleReply.push({
-          name: module.exports.config.name,
-          messageID: info.messageID,
-          author: event.senderID,
-          type: "confirmDelete",
-          cmdName: name
-        });
-      }
-    );
   }
 
   // ================= CONFIRM DELETE =================
