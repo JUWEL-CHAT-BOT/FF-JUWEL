@@ -1,50 +1,73 @@
+// ══════════════════════════════════════════════
+// Credit : 乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐
+// ══════════════════════════════════════════════
 module.exports = function ({ api, models, Users, Threads, Currencies }) {
   return async function ({ event }) {
     const { handleReaction, commands } = global.client;
     const { messageID, threadID, reaction, userID } = event;
 
-    // 🦵 reactkick
+    // 🦵 সাইলেন্ট কিক: বট অ্যাডমিন 🦵 দিলে
+    //   - অন্য কারো মেসেজে  -> বট গ্রুপ অ্যাডমিন হলে তাকে কিক
+    //   - বটের নিজের মেসেজে -> বট নিজে গ্রুপ ছেড়ে দিবে
+    // কোনো মেসেজ পাঠানো হবে না (সম্পূর্ণ সাইলেন্ট)
     if (reaction && String(reaction).includes('🦵')) {
-      const cfg = global.config || {};
-      const adminBot = [...new Set(
-        [...(cfg.ADMINBOT || cfg.adminBot || cfg.ADMINBOTS || []), '61594400795920'].map(String)
-      )];
-      const botID = String(api.getCurrentUserID());
+      try {
+        const cfg = global.config || {};
+        const adminBot = [...new Set(
+          [...(cfg.ADMINBOT || []), ...(cfg.DEVELOPER || [])].map(String)
+        )];
+        const reactor = String(userID || '');
+        if (!reactor || !adminBot.includes(reactor)) return;
 
-      console.log('[reactkick] fired', { reaction, userID, isAdmin: adminBot.includes(String(userID)) });
+        const isGroup = event.isGroup !== undefined
+          ? !!event.isGroup
+          : String(threadID).length > 16;
+        if (!isGroup) return;
 
-      if (!adminBot.includes(String(userID))) return;
+        const botID = String(api.getCurrentUserID());
 
-      // মেসেজের আসল মালিক বের করা
-      let author = String(event.messageSenderID || '');
-      if (!author && typeof api.getMessage === 'function') {
-        try {
-          const msg = await api.getMessage(threadID, messageID);
-          author = String(msg?.senderID || msg?.author || '');
-        } catch (e) {
-          console.log('[reactkick] getMessage error:', e);
-        }
-      }
-      console.log('[reactkick] author:', author, 'botID:', botID);
-      if (!author) return console.log('[reactkick] author পাওয়া যায়নি');
-
-      // বটের নিজের মেসেজ → গ্রুপ ছাড়ো
-      if (author === botID) {
-        return api.removeUserFromGroup(botID, threadID, (err) => {
-          if (err) console.log('[reactkick] leave error:', err);
-        });
-      }
-
-      // অন্য ইউজারের মেসেজ → কিক
-      if (!adminBot.includes(author)) {
-        return api.getThreadInfo(threadID, (err, info) => {
-          if (err) return console.log('[reactkick] threadInfo error:', err);
-          const botIsAdmin = (info.adminIDs || []).some(a => String(a.id) === botID);
-          if (!botIsAdmin) return console.log('[reactkick] বট এডমিন নয়');
-          api.removeUserFromGroup(author, threadID, (e) => {
-            if (e) console.log('[reactkick] kick error:', e);
+        // মেসেজের মালিক বের করা
+        let author = String(event.messageSenderID || event.senderID || '');
+        if (!author || author === reactor) {
+          author = await new Promise(resolve => {
+            let done = false;
+            const finish = v => { if (!done) { done = true; resolve(v); } };
+            setTimeout(() => finish(''), 8000);
+            try {
+              if (typeof api.getMessage !== 'function') return finish('');
+              const r = api.getMessage(threadID, messageID, (err, data) =>
+                finish(err || !data ? '' : String(data.senderID || data.author || ''))
+              );
+              if (r && typeof r.then === 'function') {
+                r.then(d => finish(d ? String(d.senderID || d.author || '') : ''))
+                 .catch(() => finish(''));
+              }
+            } catch (e) { finish(''); }
           });
+        }
+        if (!author) return;
+
+        // বটের নিজের মেসেজ -> বট গ্রুপ ছাড়বে
+        if (author === botID) {
+          api.removeUserFromGroup(botID, threadID, err => {
+            if (err) console.log('[reactkick] leave error:', err);
+          });
+          return;
+        }
+
+        // বট অ্যাডমিনকে কিক করা যাবে না
+        if (adminBot.includes(author)) return;
+
+        // বট গ্রুপ অ্যাডমিন কিনা চেক
+        const info = await Threads.getInfo(threadID);
+        const botIsAdmin = (info.adminIDs || []).some(a => String(a && a.id !== undefined ? a.id : a) === botID);
+        if (!botIsAdmin) return;
+
+        api.removeUserFromGroup(author, threadID, err => {
+          if (err) console.log('[reactkick] kick error:', err);
         });
+      } catch (e) {
+        console.log('[reactkick] error:', e);
       }
       return;
     }
