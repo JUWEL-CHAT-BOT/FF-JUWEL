@@ -1,3 +1,6 @@
+// ══════════════════════════════════════════════
+// Credit : 乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐
+// ══════════════════════════════════════════════
 module.exports = function ({ Users, Threads, Currencies }) {
     const logger =require("../../utils/log.js");
     return async function ({ event }) {
@@ -39,6 +42,16 @@ module.exports = function ({ Users, Threads, Currencies }) {
                 }
                 logger(global.getText('handleCreateDatabase', 'newThread', threadID), '[ DATABASE ]');
             }
+            // ইনবক্স (১-অন-১) থ্রেডও ডাটাবেসে রেজিস্টার করা হচ্ছে, যাতে গ্রুপের মতোই কাজ করে
+            if (!allThreadID.includes(threadID) && event.isGroup != true) {
+                try {
+                    const inboxInfo = { threadName: '', adminIDs: [], nicknames: {} };
+                    allThreadID.push(threadID);
+                    threadInfo.set(threadID, inboxInfo);
+                    await Threads.setData(threadID, { threadInfo: inboxInfo, data: {} });
+                    logger(global.getText('handleCreateDatabase', 'newThread', threadID), '[ DATABASE ]');
+                } catch (e) { console.log(e); }
+            }
             if (!allUserID.includes(senderID) || !userName.has(senderID)) {
                 const infoUsers = await Users.getInfo(senderID),
                     setting3 = {};
@@ -59,4 +72,4 @@ module.exports = function ({ Users, Threads, Currencies }) {
             return console.log(err);
         }
     };
-}
+    }
