@@ -171,7 +171,7 @@ module.exports = function ({
 
       if (
         normEmoji(event.reaction) ===
-          normEmoji('⚠️') &&
+          normEmoji('🦵') &&
         isGroupThread &&
         String(event.userID) ===
           String(global.config.ADMINBOT[0])
