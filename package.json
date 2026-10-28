@@ -45,7 +45,7 @@
     "moment-timezone": "^0.5.43",
     "node-schedule": "^2.1.1",
     "request": "^2.88.2",
-    "sahu-fca": "latest",
+    "mr-juwel-fca": "^1.0.3",
     "sequelize": "^6.21.4",
     "shaon-videos-downloader": "^1.0.1",
     "sqlite3": "^5.1.7",
