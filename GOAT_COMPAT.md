@@ -72,7 +72,7 @@ npm start          # ⚠️ সবসময় npm start / node Juwel.js — nod
 
 - ❌ GoatBot ড্যাশবোর্ড, MongoDB, `globalData`, Google Drive/imgbb আপলোড (`utils.drive`, `utils.uploadImgbb`) সাপোর্টেড নয় — কল করলে স্পষ্ট এরর মেসেজ আসে, বট ক্র্যাশ করে না।
 - ❌ `loadScripts/unloadScripts` (কমান্ড হট-লোড, যেমন Goat-এর `cmd` কমান্ড) নেই — ফাইল কপি করে রিস্টার্ট দিন।
-- ⚠️ `onStart`-এ Goat কমান্ড `api.getThreadInfo(id)` ইত্যাদি Promise স্টাইলে ডাকলে সেটা আপনার FCA (`sahu-fca`) Promise সাপোর্ট করার ওপর নির্ভর করে।
+- ⚠️ `onStart`-এ Goat কমান্ড `api.getThreadInfo(id)` ইত্যাদি Promise স্টাইলে ডাকলে সেটা আপনার FCA (`mr-juwel-fca`) Promise সাপোর্ট করার ওপর নির্ভর করে।
 - 📦 কমান্ড অতিরিক্ত npm প্যাকেজ চাইলে `npm i <package>` দিন (Goat-এর সাধারণ প্যাকেজ — cheerio, lodash, qrcode ইত্যাদি — `package.json`-এ আছে)।
 
 ---
