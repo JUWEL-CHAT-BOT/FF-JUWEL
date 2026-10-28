@@ -74,7 +74,7 @@ const ytapi = async () => {
 module.exports.config = {
   name: "song",
   aliases: ["music", "songs", "gan"],
-  version: "2.4.0",
+  version: "2.5.0",
   credits: CREDIT,
   countDown: 0,
   hasPermssion: 0,
@@ -493,6 +493,7 @@ module.exports.run = async ({ api, event, args }) => {
       const entry = {
         name: "song",
         messageID: info.messageID,
+        commandMessageID: messageID, // 👈 আপনার মূল কমান্ড মেসেজ (গান এটাতেই রিপ্লাই হবে)
         author: senderID,
         results: songs,
         jobs,
@@ -603,7 +604,8 @@ module.exports.handleReply = async ({ api, event, handleReply }) => {
         const list = global.client.handleReply;
         const idx = list.findIndex(h => h.messageID === handleReply.messageID);
         if (idx !== -1) list.splice(idx, 1);
-      }
+      },
+      handleReply.commandMessageID || messageID // 👈 মূল কমান্ড মেসেজে রিপ্লাই হবে
     );
   } catch (error) {
     console.log("[song] ডাউনলোড এরর:", error.message);
