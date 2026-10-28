@@ -4,6 +4,8 @@
  *  Credit : 乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐
  * ╚══════════════════════════════════════════════════════════╝
  *
+ *  v1.8.0 — সব নোটিশে (লক/সেশন ALERT সহ) বট কতক্ষণ চালু ছিল তা দেখায়।
+ *           সময়ের ক্রম: সেকেন্ড → মিনিট → ঘণ্টা → দিন।
  *  v1.7.0 — আইডি লক/সেশন সমস্যার নোটিশ একবারই, বট বন্ধের নোটিশও একবারই (রিস্টার্টেও বারবার যাবে না)।
  *           টানা ৫ মিনিট সুস্থ থাকলে তবেই লক খোলে এবং একবার "BACK ONLINE" যায়।
  *  v1.6.0 — প্রতিটি নোটিশে বটের নাম, অ্যাডমিনের নাম ও প্রথম অ্যাডমিন UID (config.json থেকে)।
@@ -90,17 +92,24 @@ const dhakaTime = () => {
   try { return new Date().toLocaleString("en-GB", { timeZone: "Asia/Dhaka", hour12: true }); }
   catch (_) { return new Date().toISOString(); }
 };
-const fmtDur = (ms) => {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
-  return (d ? d + "d " : "") + h + "h " + m + "m";
-};
 const pad2 = (n) => String(n).padStart(2, "0");
 // সেকেন্ড থেকে দিন/ঘণ্টা/মিনিট/সেকেন্ড
 const uptimeParts = (sec) => {
   const s = Math.max(0, Math.floor(sec));
   return { d: Math.floor(s / 86400), h: Math.floor((s % 86400) / 3600), m: Math.floor((s % 3600) / 60), s: s % 60 };
 };
+// সময় সবসময় এই ক্রমে: সেকেন্ড → মিনিট → ঘণ্টা → দিন
+const fmtDur = (ms) => {
+  const u = uptimeParts(ms / 1000);
+  return u.s + "s " + u.m + "m " + u.h + "h " + u.d + "d";
+};
+// সব নোটিশে একই সাজানো সময়-ব্লক (সেকেন্ড → মিনিট → ঘণ্টা → দিন)
+const uptimeLines = (up) =>
+  " ┌ ⏳ SECONDS ➤ " + pad2(up.s) + "\n" +
+  " ├ ⏰ MINUTES ➤ " + pad2(up.m) + "\n" +
+  " ├ 🕐 HOURS ➤ " + pad2(up.h) + "\n" +
+  " └ 📆 DAYS ➤ " + pad2(up.d) + "\n" +
+  " ✦ " + pad2(up.s) + "s " + pad2(up.m) + "m " + pad2(up.h) + "h " + up.d + "d";
 
 // ইংরেজি অক্ষর ও সংখ্যা → 𝗔𝗕𝗖𝗗 𝟭𝟮𝟯 (Sans-Serif Bold). বাংলা/ইমোজি অপরিবর্তিত থাকে।
 const fx = (str) => String(str).replace(/[A-Za-z0-9]/g, (c) => {
@@ -189,10 +198,12 @@ async function raiseAlert(reason) {
   if (state.alertSending || now - state.lastAlertAt < 60 * 1000) return;
   state.alertSending = true;
   state.lastAlertAt = now;
+  const upA = uptimeParts(process.uptime());
   const text =
     HEAD("🚨 JUWEL BOT • ALERT") + "\n\n" +
     "🔴 STATUS ➤ SESSION PROBLEM\n" + LINE + "\n" +
-    "📛 কারণ ➤ " + reason + "\n" +
+    "📛 কারণ ➤ " + reason + "\n" + LINE + "\n" +
+    "⏱ চালু ছিল\n" + uptimeLines(upA) + "\n" + LINE + "\n" +
     "🕒 TIME ➤ " + dhakaTime() + "\n" + LINE + "\n" +
     "🛠 করণীয়: নতুন appstate.json (কুকি) বসিয়ে বট রিস্টার্ট দিন।";
   log("সতর্কতা: " + reason, "error");
@@ -242,12 +253,7 @@ function stopText(reason, startMs, endMs) {
     HEAD("🔴 JUWEL BOT • STOPPED") + "\n\n" +
     "🔴 STATUS ➤ OFFLINE\n" + LINE + "\n" +
     "📛 কারণ ➤ " + reason + "\n" + LINE + "\n" +
-    "⏱ চালু ছিল\n" +
-    " ┌ 📆 DAYS ➤ " + pad2(up.d) + "\n" +
-    " ├ 🕐 HOURS ➤ " + pad2(up.h) + "\n" +
-    " ├ ⏰ MINUTES ➤ " + pad2(up.m) + "\n" +
-    " └ ⏳ SECONDS ➤ " + pad2(up.s) + "\n" +
-    " ✦ " + up.d + "d " + pad2(up.h) + "h " + pad2(up.m) + "m " + pad2(up.s) + "s\n" + LINE + "\n" +
+    "⏱ চালু ছিল\n" + uptimeLines(up) + "\n" + LINE + "\n" +
     "📅 STARTED ➤ " + started + "\n" +
     "🕒 STOPPED ➤ " + stopped
   );
@@ -613,12 +619,7 @@ function healthText() {
   return (
     HEAD("🤖 JUWEL BOT • STATUS") + "\n\n" +
     (state.down ? "🔴 STATUS ➤ PROBLEM" : "🟢 STATUS ➤ ONLINE") + "\n" + LINE + "\n" +
-    "⏱ UPTIME\n" +
-    " ┌ 📆 DAYS ➤ " + pad2(up.d) + "\n" +
-    " ├ 🕐 HOURS ➤ " + pad2(up.h) + "\n" +
-    " ├ ⏰ MINUTES ➤ " + pad2(up.m) + "\n" +
-    " └ ⏳ SECONDS ➤ " + pad2(up.s) + "\n" +
-    " ✦ " + up.d + "d " + pad2(up.h) + "h " + pad2(up.m) + "m " + pad2(up.s) + "s\n" + LINE + "\n" +
+    "⏱ UPTIME\n" + uptimeLines(up) + "\n" + LINE + "\n" +
     "📅 STARTED ➤ " + started + "\n" +
     "🕒 NOW ➤ " + dhakaTime() + "\n" + LINE + "\n" +
     "🩺 HEALTH CHECK\n" +
@@ -642,15 +643,7 @@ function uptimeBlock() {
   let started;
   try { started = startedAt.toLocaleString("en-GB", { timeZone: "Asia/Dhaka", hour12: true }); }
   catch (_) { started = startedAt.toISOString(); }
-  return (
-    "⏱ UPTIME\n" +
-    " ┌ 📆 DAYS ➤ " + pad2(up.d) + "\n" +
-    " ├ 🕐 HOURS ➤ " + pad2(up.h) + "\n" +
-    " ├ ⏰ MINUTES ➤ " + pad2(up.m) + "\n" +
-    " └ ⏳ SECONDS ➤ " + pad2(up.s) + "\n" +
-    " ✦ " + up.d + "d " + pad2(up.h) + "h " + pad2(up.m) + "m " + pad2(up.s) + "s\n" + LINE + "\n" +
-    "📅 STARTED ➤ " + started
-  );
+  return "⏱ UPTIME\n" + uptimeLines(up) + "\n" + LINE + "\n" + "📅 STARTED ➤ " + started;
 }
 
 /* ───────────── test notice (সাজানো) ───────────── */
@@ -730,7 +723,7 @@ const withCredit = (t) => fx(t) + "\n" + LINE + "\n" + infoBlock() + "\n" + LINE
 module.exports.config = {
   name: "juwelalert",
   aliases: ["jalert"],
-  version: "1.7.0",
+  version: "1.8.0",
   hasPermssion: 2,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "সেশন সতর্কতা ও বট চালু/বন্ধ নোটিশ",
@@ -764,4 +757,4 @@ if (IS_WATCHER) {
 } else {
   // ফাইল লোড হওয়ার সাথে সাথেই চালু — onLoad/handleEvent না চললেও নজরদারি কাজ করবে
   try { start(); } catch (e) { log("start ত্রুটি: " + e.message, "error"); }
-  }
+}
