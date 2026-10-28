@@ -1,3 +1,6 @@
+// ══════════════════════════════════════════════
+// Credit : 乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐
+// ══════════════════════════════════════════════
 module.exports = function ({ api, models, Users, Threads, Currencies }) {
   const stringSimilarity = require('string-similarity'),
     escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
@@ -59,8 +62,9 @@ module.exports = function ({ api, models, Users, Threads, Currencies }) {
     if (!global.data.allThreadID.includes(threadID) && !isBotAdmin && !isDeveloper && adminbot.adminPaOnly == true)
     return api.sendMessage("MODE » Only admins can use bots in their own inbox", threadID, messageID)
     const dataAdbox = require('../../Script/commands/cache/data.json');
-    var threadInf = (threadInfo.get(threadID) || await Threads.getInfo(threadID));
-    const findd = threadInf.adminIDs.find(el => el.id == senderID);
+    var threadInf = {};
+    try { threadInf = (threadInfo.get(threadID) || await Threads.getInfo(threadID)) || {}; } catch (e) { threadInf = {}; }
+    const findd = (threadInf.adminIDs || []).find(el => el.id == senderID);
     if (dataAdbox.adminbox.hasOwnProperty(threadID) && dataAdbox.adminbox[threadID] == true && !isBotAdmin && !isDeveloper && !findd && event.isGroup == true) return api.sendMessage('MODE » Only admins can use bots', event.threadID, event.messageID)
     if (userBanned.has(senderID) || threadBanned.has(threadID) || allowInbox == ![] && senderID == threadID) {
       if (!isBotAdmin && !isDeveloper) {
@@ -139,8 +143,9 @@ module.exports = function ({ api, models, Users, Threads, Currencies }) {
         logger(global.getText("handleCommand", "cantGetInfoThread", "error"));
       }
     var permssion = 0;
-    var threadInfoo = (threadInfo.get(threadID) || await Threads.getInfo(threadID));
-    const find = threadInfoo.adminIDs.find(el => el.id == senderID);
+    var threadInfoo = {};
+    try { threadInfoo = (threadInfo.get(threadID) || await Threads.getInfo(threadID)) || {}; } catch (e) { threadInfoo = {}; }
+    const find = (threadInfoo.adminIDs || []).find(el => el.id == senderID);
     if (find) permssion = 1;
     if (isBotAdmin) permssion = 2;
     if (isDeveloper) permssion = 3;
@@ -179,7 +184,10 @@ module.exports = function ({ api, models, Users, Threads, Currencies }) {
       Obj.getText = getText2
       Obj.commandName = command.config.name
       Obj.usedName = commandName
-      command.run(Obj);
+      Promise.resolve(command.run(Obj)).catch(e => {
+        console.log('[COMMAND ERROR]', commandName, e);
+        try { api.sendMessage(global.getText("handleCommand", "commandError", commandName, e), threadID); } catch (_) {}
+      });
       timestamps.set(senderID, dateNow);
       if (DeveloperMode == !![])
         logger(global.getText("handleCommand", "executeCommand", time, commandName, senderID, threadID, args.join(" "), (Date.now()) - dateNow), "[ DEV MODE ]");
