@@ -1,3 +1,6 @@
+// ══════════════════════════════════════════════
+// Credit : 乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐
+// ══════════════════════════════════════════════
 module.exports = function ({
   api,
   models,
@@ -544,6 +547,11 @@ module.exports = function ({
     "[ " + logAnthorName + "  ]"
   );
 
+  // ── Credit (বট চালু হলে কনসোলে দেখাবে) ──
+  console.log("══════════════════════════════════════════════");
+  console.log(" Credit : 乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐");
+  console.log("══════════════════════════════════════════════");
+
   const handleCommand = require(
     "./handle/handleCommand"
   )({
@@ -1014,21 +1022,21 @@ module.exports = function ({
           event
         );
 
-        handleCreateDatabase({
+        Promise.resolve(handleCreateDatabase({
           event
-        });
+        })).catch(e => console.log('[handleCreateDatabase ERROR]', e));
 
-        handleCommand({
+        Promise.resolve(handleCommand({
           event
-        });
+        })).catch(e => console.log('[handleCommand ERROR]', e));
 
-        handleReply({
+        Promise.resolve(handleReply({
           event
-        });
+        })).catch(e => console.log('[handleReply ERROR]', e));
 
-        handleCommandEvent({
+        Promise.resolve(handleCommandEvent({
           event
-        });
+        })).catch(e => console.log('[handleCommandEvent ERROR]', e));
 
         break;
 
