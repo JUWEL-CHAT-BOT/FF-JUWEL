@@ -46,7 +46,7 @@ const blockTriggers = [
 ];
 
 const cooldown = new Map();
-const COOLDOWN_TIME = 2 * 60 * 60 * 1000; // ২ ঘন্টা
+const COOLDOWN_TIME = 5 * 60 * 60 * 1000; // ৫ ঘন্টা
 
 // কনফিগ ফাইল থেকে বট অ্যাডমিন লোড করার ফাংশন
 function getBotAdmins() {
@@ -100,7 +100,7 @@ module.exports.handleEvent = async function ({ api, event }) {
     const botAdmins = getBotAdmins();
     if (botAdmins.includes(senderID)) return;
 
-    // ⏳ ২ ঘন্টা কুলডাউন চেক
+    // ⏳ ৫ ঘন্টা কুলডাউন চেক
     const lastTime = cooldown.get(senderID) || 0;
     if (now - lastTime < COOLDOWN_TIME) return;
     cooldown.set(senderID, now);
