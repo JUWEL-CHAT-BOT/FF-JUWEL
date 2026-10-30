@@ -24,46 +24,100 @@ function saveData() {
 
 module.exports.config = {
   name: "rules",
-  version: "9.1.0",
+  version: "9.3.0",
   hasPermssion: 0,
-  credits: "𝐌𝐑 𝐉𝐔𝐖𝐄𝐋",
+  credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "Auto + Command rules with all admins (name + FB link)",
   commandCategory: "information",
   usages: "rules",
   cooldowns: 5
 };
 
-// 🔰 SAFE NAME GETTER
-async function getName(Users, id) {
+// 🔰 SAFE NAME GETTER (Users -> api.getUserInfo -> fallback)
+async function getName(Users, api, id) {
   try {
     const n = await Users.getNameUser(id);
-    return n || "Facebook User";
+    if (n && n !== "Facebook User" && n !== "Facebook users") return n;
+  } catch (e) {}
+
+  try {
+    const info = await new Promise((res, rej) => {
+      api.getUserInfo(id, (err, d) => (err ? rej(err) : res(d)));
+    });
+    if (info && info[id] && info[id].name) return info[id].name;
+  } catch (e) {}
+
+  return "Facebook User";
+}
+
+// 🔰 THREAD INFO GETTER (callback + promise দুটোই সাপোর্ট)
+async function getThreadInfoSafe(api, Threads, threadID) {
+  // ১) api.getThreadInfo (callback / promise)
+  try {
+    const info = await new Promise((res, rej) => {
+      let done = false;
+      const finish = (fn, v) => {
+        if (!done) {
+          done = true;
+          fn(v);
+        }
+      };
+      try {
+        const r = api.getThreadInfo(threadID, (err, d) =>
+          err ? finish(rej, err) : finish(res, d)
+        );
+        if (r && typeof r.then === "function") {
+          r.then(d => finish(res, d)).catch(e => finish(rej, e));
+        }
+      } catch (e) {
+        finish(rej, e);
+      }
+      setTimeout(() => finish(rej, new Error("getThreadInfo timeout")), 15000);
+    });
+    if (info && (info.threadName || info.name || (info.adminIDs || []).length)) {
+      return info;
+    }
   } catch (e) {
-    return "Facebook User";
+    console.log("RULES getThreadInfo FAIL:", e && e.message ? e.message : e);
   }
+
+  // ২) Threads.getInfo
+  try {
+    if (Threads && Threads.getInfo) {
+      const d = await Threads.getInfo(threadID);
+      if (d) return d;
+    }
+  } catch (_) {}
+
+  // ৩) Threads.getData
+  try {
+    if (Threads && Threads.getData) {
+      const d = await Threads.getData(threadID);
+      if (d && d.threadInfo) return d.threadInfo;
+    }
+  } catch (_) {}
+
+  // ৪) global cache
+  try {
+    if (global.data && global.data.threadInfo && global.data.threadInfo.get(threadID)) {
+      return global.data.threadInfo.get(threadID);
+    }
+  } catch (_) {}
+
+  return {};
 }
 
 // 🔰 MESSAGE BUILDER
 async function buildMessage(api, event, Users, Threads) {
-  // থ্রেড ইনফো আনা (ফেইল করলে Threads ডাটাবেস থেকে নেবে)
-  let threadInfo = {};
-  try {
-    threadInfo = (await api.getThreadInfo(event.threadID)) || {};
-  } catch (e) {
-    console.log("RULES getThreadInfo FAIL:", e && e.message ? e.message : e);
-    try {
-      if (Threads && Threads.getData) {
-        const d = await Threads.getData(event.threadID);
-        threadInfo = (d && d.threadInfo) || {};
-      }
-    } catch (_) {}
-  }
+  const threadInfo = await getThreadInfoSafe(api, Threads, event.threadID);
 
-  const threadName = threadInfo.threadName || "Unknown Group";
-  const adminIDs = threadInfo.adminIDs || [];
+  const threadName = threadInfo.threadName || threadInfo.name || "Unnamed Group";
+  const adminIDs = (threadInfo.adminIDs || []).map(a =>
+    typeof a === "object" ? a : { id: a }
+  );
 
   // 🔰 সব গ্রুপ এডমিনের নাম + ফেসবুক লিংক
-  const names = await Promise.all(adminIDs.map(a => getName(Users, a.id)));
+  const names = await Promise.all(adminIDs.map(a => getName(Users, api, a.id)));
 
   let adminText = "";
   const mentions = [];
@@ -80,7 +134,7 @@ async function buildMessage(api, event, Users, Threads) {
 
   // 🔰 BOT ADMIN (config.json এর প্রথম ADMINBOT UID)
   const botAdminUID = String(((global.config && global.config.ADMINBOT) || [])[0] || "");
-  const botAdminName = botAdminUID ? await getName(Users, botAdminUID) : "Not Found";
+  const botAdminName = botAdminUID ? await getName(Users, api, botAdminUID) : "Not Found";
   const botAdminLink = botAdminUID
     ? `https://www.facebook.com/${botAdminUID}`
     : "লিংক পাওয়া যায়নি";
@@ -129,7 +183,22 @@ async function buildMessage(api, event, Users, Threads) {
 ৩২) SPAM করবেন না 🚫  
 ৩৩) সমস্যা হলে অ্যাডমিনকে বলবেন 🚫  
 ৩৪) গ্রুপে ঝগড়া করবেন না 🚫  
-৩৫) সবাই মিলেমিশে আড্ডা দিবেন 🌷😻
+৩৫) সবাই মিলেমিশে আড্ডা দিবেন 🌷😻  
+৩৬) অন্যের ব্যক্তিগত ছবি / তথ্য শেয়ার করা যাবে না 🚫  
+৩৭) কাউকে হুমকি বা ব্ল্যাকমেইল করলে সরাসরি কিক ⚡🚫  
+৩৮) টাকা চাওয়া, প্রতারণা বা স্ক্যাম লিংক দেওয়া যাবে না 🚫  
+৩৯) গ্রুপে অকারণে কল বা ভিডিও কল দেওয়া যাবে না 🚫  
+৪০) বট কমান্ড স্প্যাম করা যাবে না 🤖🚫  
+৪১) এডমিনের অনুমতি ছাড়া কোনো প্রমোশন / বিজ্ঞাপন দেওয়া যাবে না 📢🚫  
+৪২) অন্যের কথার স্ক্রিনশট অনুমতি ছাড়া বাইরে শেয়ার করা যাবে না 📸🚫  
+৪৩) বড় বড় টেক্সট বা কপি-পেস্ট দিয়ে চ্যাট নষ্ট করা যাবে না 🚫  
+৪৪) রাজনৈতিক তর্ক-বিতর্ক করা যাবে না 🚫  
+৪৫) কারও প্রতি খারাপ মন্তব্য বা বডি শেমিং করা যাবে না ⚠️🚫  
+৪৬) ফেক আইডি বা অন্যের নাম-ছবি ব্যবহার করা যাবে না 🚫  
+৪৭) এডমিনের অনুমতি ছাড়া মেম্বার রিমুভ বা এডমিন বানানো যাবে না 🛡🚫  
+৪৮) মজা করতে গিয়ে কাউকে কষ্ট দেওয়া যাবে না 🌷  
+৪৯) নতুন কেউ এলে তাকে সালাম দিয়ে স্বাগত জানাবেন 🤝🌷  
+৫০) নিয়ম ভাঙলে প্রথমে ওয়ার্নিং, বারবার করলে কিক ⚠️
 ╚══════════════════════╝
 
  👑 BOT ADMIN:
