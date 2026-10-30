@@ -4,7 +4,7 @@ const path = require("path");
 
 module.exports.config = {
   name: "prefix",
-  version: "3.2.0",
+  version: "3.3.0",
   hasPermssion: 0,
   credits: "MR JUWEL",
   description: "Show bot prefix, owner info, system stats & command list",
@@ -14,7 +14,7 @@ module.exports.config = {
 };
 
 // Put your own links here
-const OWNER_FB_LINK = "https://www.fb.com/mrjuwel444";
+const OWNER_FB_LINK = "https://www.fb.com/mrjuwel333";
 const SUPPORT_LINK = "https://m.me/j/bUq30eov7FMa149R/?send_source=gc%3Acopy_invite_link_t";
 
 // Auto delete time for the info card (20 seconds)
@@ -70,7 +70,7 @@ function mb(bytes) {
 
 function getBotInfo() {
   return {
-    botName: global.config.BOTNAME || "⎯꯭𓆩꯭𝆺𝅥😻⃞𝐑⃞𝐈⃞𝐘⃞𝐀⃞༢࿐",
+    botName: global.config.BOTNAME || "────〲─⃞🎀⁽𝐑𝆠፝֟𝐈𝐘𝆠፝֟𝐀₎⪨‌‌‌‌‌‌‌‌‌‌‌‎⤸⃞🎀𐙚࿐",
     ownerName: global.config.OWNER_NAME || "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐"
   };
 }
@@ -84,84 +84,10 @@ async function getUserName(Users, senderID) {
 }
 
 // ─────────────────────────────────────────────
-// Trigger words (no prefix needed): only tells the prefix
+// Sends the BIG info card (shared by trigger words and the command)
 // ─────────────────────────────────────────────
-module.exports.handleEvent = async ({ event, api }) => {
-  const { threadID, messageID, body, senderID } = event;
-  if (!body) return;
-
-  const now = Date.now();
-  if (spamMap.has(senderID) && now - spamMap.get(senderID) < SPAM_COOLDOWN) return;
-
-  const triggerWords = [
-    "prefix", "mprefix", "mpre", "bot prefix", "what is the prefix", "bot name",
-    "how to use bot", "bot not working", "bot is offline", "prefx", "prfix",
-    "perfix", "bot not talking", "where is bot", "bot dead", "bots dead",
-    "what prefix", "freefix", "what is bot", "what prefix bot",
-    "how use bot", "where are the bots", "where prefix",
-    "প্রিফিক্স", "বট প্রিফিক্স", "পিন", "বটের নাম", "বট কি",
-    "বট কাজ করছে না", "বট অফলাইন", "প্রিফিক্স কি",
-    "प्रीफिक्स", "बॉट प्रीफिक्स", "बॉट का नाम", "बॉट क्या है",
-    "dấu lệnh", "daulenh", "tiền tố"
-  ];
-
-  if (!triggerWords.includes(body.toLowerCase().trim())) return;
-  spamMap.set(senderID, now);
-
-  const reactions = ["💖", "✨", "🌸", "💫", "❤️", "🦋", "🌟"];
-  api.setMessageReaction(
-    reactions[Math.floor(Math.random() * reactions.length)],
-    messageID, () => {}, true
-  );
-
-  const prefix = getPrefix(threadID);
-  if (!prefix || String(prefix).trim() === "") {
-    return api.sendMessage(f("Prefix cannot be blank"), threadID, messageID);
-  }
-
-  return api.sendMessage(
-`╭─────────────⭓
-│  ✨ ${f("PREFIX")} ✨
-│  ➤ 『 ${prefix} 』
-├─────────────⭓
-│  📌 ${f("For full info, type:")}
-│  ${prefix}prefix
-╰─────────────⭓`,
-    threadID,
-    messageID
-  );
-};
-
-// ─────────────────────────────────────────────
-// Run with prefix: {prefix}prefix  or  {prefix}prefix help
-// ─────────────────────────────────────────────
-module.exports.run = async ({ event, api, args, Users }) => {
+async function sendBigCard({ api, event, Users, prefix }) {
   const { threadID, messageID, senderID } = event;
-
-  const prefix = getPrefix(threadID);
-  if (!prefix || String(prefix).trim() === "") {
-    return api.sendMessage(f("Prefix cannot be blank"), threadID, messageID);
-  }
-
-  // Command list
-  if (args[0] && args[0].toLowerCase() === "help") {
-    const cmds = global.client && global.client.commands
-      ? Array.from(global.client.commands.keys()).sort()
-      : [];
-    const list = cmds.length
-      ? cmds.map((c) => `• ${prefix}${c}`).join("\n")
-      : f("No commands found");
-    return api.sendMessage(
-`╭─────────────⭓
-│  📜 ${f("Command List")} (${f(cmds.length)})
-├─────────────⭓
-${list}
-╰─────────────⭓
-💡 ${f("Details:")} ${prefix}help <command>`,
-      threadID,
-      messageID
-    );
-  }
 
   const userName = await getUserName(Users, senderID);
   const { botName, ownerName } = getBotInfo();
@@ -179,7 +105,7 @@ ${list}
   const cpuCores = cpus.length;
   const load = os.loadavg()[0].toFixed(2);
 
-  // Ping (no extra message needed)
+  // Ping
   const ping = event.timestamp ? Math.max(Date.now() - event.timestamp, 0) : 0;
 
   const msg =
@@ -218,4 +144,77 @@ ${list}
     },
     messageID
   );
+}
+
+// ─────────────────────────────────────────────
+// Trigger words (no prefix needed) → now show the BIG card
+// ─────────────────────────────────────────────
+module.exports.handleEvent = async ({ event, api, Users }) => {
+  const { threadID, messageID, body, senderID } = event;
+  if (!body) return;
+
+  const now = Date.now();
+  if (spamMap.has(senderID) && now - spamMap.get(senderID) < SPAM_COOLDOWN) return;
+
+  const triggerWords = [
+    "prefix", "mprefix", "mpre", "bot prefix", "what is the prefix", "bot name",
+    "how to use bot", "bot not working", "bot is offline", "prefx", "prfix",
+    "perfix", "bot not talking", "where is bot", "bot dead", "bots dead",
+    "what prefix", "freefix", "what is bot", "what prefix bot",
+    "how use bot", "where are the bots", "where prefix",
+    "প্রিফিক্স", "বট প্রিফিক্স", "পিন", "বটের নাম", "বট কি",
+    "বট কাজ করছে না", "বট অফলাইন", "প্রিফিক্স কি",
+    "प्रीफिक्स", "बॉट प्रीफिक्स", "बॉट का नाम", "बॉट क्या है",
+    "dấu lệnh", "daulenh", "tiền tố"
+  ];
+
+  if (!triggerWords.includes(body.toLowerCase().trim())) return;
+  spamMap.set(senderID, now);
+
+  const reactions = ["💖", "✨", "🌸", "💫", "❤️", "🦋", "🌟"];
+  api.setMessageReaction(
+    reactions[Math.floor(Math.random() * reactions.length)],
+    messageID, () => {}, true
+  );
+
+  const prefix = getPrefix(threadID);
+  if (!prefix || String(prefix).trim() === "") {
+    return api.sendMessage(f("Prefix cannot be blank"), threadID, messageID);
+  }
+
+  return sendBigCard({ api, event, Users, prefix });
+};
+
+// ─────────────────────────────────────────────
+// Run with prefix: {prefix}prefix  or  {prefix}prefix help
+// ─────────────────────────────────────────────
+module.exports.run = async ({ event, api, args, Users }) => {
+  const { threadID, messageID } = event;
+
+  const prefix = getPrefix(threadID);
+  if (!prefix || String(prefix).trim() === "") {
+    return api.sendMessage(f("Prefix cannot be blank"), threadID, messageID);
+  }
+
+  // Command list
+  if (args[0] && args[0].toLowerCase() === "help") {
+    const cmds = global.client && global.client.commands
+      ? Array.from(global.client.commands.keys()).sort()
+      : [];
+    const list = cmds.length
+      ? cmds.map((c) => `• ${prefix}${c}`).join("\n")
+      : f("No commands found");
+    return api.sendMessage(
+`╭─────────────⭓
+│  📜 ${f("Command List")} (${f(cmds.length)})
+├─────────────⭓
+${list}
+╰─────────────⭓
+💡 ${f("Details:")} ${prefix}help <command>`,
+      threadID,
+      messageID
+    );
+  }
+
+  return sendBigCard({ api, event, Users, prefix });
 };
