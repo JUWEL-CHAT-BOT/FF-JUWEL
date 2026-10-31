@@ -4,6 +4,10 @@
  *  Credit : 乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐
  * ╚══════════════════════════════════════════════════════════╝
  *
+ *  v1.9.0 — একসাথে ৫-৬টা "STOPPED" নোটিশ আসার সমস্যা ঠিক: পাঠানোর আগেই ফাইল-লক দিয়ে
+ *           দখল (claim) নেওয়া হয়, তাই রিস্টার্ট/ওয়াচডগ একসাথে পাঠাতে পারে না।
+ *           ALERT নোটিশেও চালু থাকার সময় + STARTED যোগ। রিস্টার্ট লুপে সময় ০ থেকে শুরু হয় না
+ *           (৫ মিনিটের মধ্যে রিস্টার্ট হলে আগের সময় থেকেই গোনা চলে)।
  *  v1.8.0 — সব নোটিশে (লক/সেশন ALERT সহ) বট কতক্ষণ চালু ছিল তা দেখায়।
  *           সময়ের ক্রম: সেকেন্ড → মিনিট → ঘণ্টা → দিন।
  *  v1.7.0 — আইডি লক/সেশন সমস্যার নোটিশ একবারই, বট বন্ধের নোটিশও একবারই (রিস্টার্টেও বারবার যাবে না)।
@@ -48,8 +52,12 @@ const STOP_NOTICE_WAIT_MS = 6000; // বন্ধ হওয়ার আগে �
 const RECOVER_STABLE_MS = Number(process.env.JUWEL_RECOVER_MS) || 5 * 60 * 1000; // এতক্ষণ টানা সুস্থ থাকলে তবেই "ফিরে এসেছে"
 const EPISODE_MAX_MS = 6 * 60 * 60 * 1000; // নিরাপত্তা: ৬ ঘণ্টা পর লক নিজে খুলে যাবে
 
-/* ───────────── একবারই-পাঠানো লক (ফাইলে থাকে, রিস্টার্টেও টিকে) ───────────── */
+/* ───────────── একবারই-পাঠানো লক (ফাইলে, প্রসেস-নিরাপদ) ───────────── */
 const LATCH_FILE = require("path").join(__dirname, "..", "..", "juwelalert.latch.json");
+const LOCK_FILE = LATCH_FILE + ".lock";
+const RUN_FILE = require("path").join(__dirname, "..", "..", "juwelalert.run.json");
+const PENDING_MS = 20 * 1000; // "পাঠানো চলছে" ধরে নেওয়ার সর্বোচ্চ সময়
+
 function latchRead() {
   try { return JSON.parse(require("fs").readFileSync(LATCH_FILE, "utf8")) || {}; }
   catch (_) { return {}; }
@@ -57,17 +65,65 @@ function latchRead() {
 function latchWrite(o) {
   try { require("fs").writeFileSync(LATCH_FILE, JSON.stringify(o)); } catch (_) {}
 }
+// একসাথে একাধিক প্রসেস ভেতরে ঢুকতে পারবে না
+function withFileLock(fn) {
+  const fs = require("fs");
+  const t0 = Date.now();
+  while (true) {
+    try { fs.writeFileSync(LOCK_FILE, String(process.pid), { flag: "wx" }); break; }
+    catch (_) {
+      try { if (Date.now() - fs.statSync(LOCK_FILE).mtimeMs > 5000) fs.unlinkSync(LOCK_FILE); } catch (__) {}
+      if (Date.now() - t0 > 3000) break;
+      const end = Date.now() + 25; while (Date.now() < end) {}
+    }
+  }
+  try { return fn(); } finally { try { fs.unlinkSync(LOCK_FILE); } catch (_) {} }
+}
 // key: "alert" (লক/সেশন সমস্যা) | "stop" (বট বন্ধ)
+// পাঠানো হয়ে গেছে বা কেউ এখন পাঠাচ্ছে → false
 function canSend(key) {
-  const t = latchRead()[key];
-  return !(t && Date.now() - t < EPISODE_MAX_MS);
+  const o = latchRead();
+  const t = o[key], p = o[key + "_p"];
+  if (t && Date.now() - t < EPISODE_MAX_MS) return false;
+  if (p && Date.now() - p < PENDING_MS) return false;
+  return true;
+}
+// পাঠানোর আগে দখল নেয়; সফল হলে true
+function claim(key) {
+  return withFileLock(() => {
+    if (!canSend(key)) return false;
+    const o = latchRead(); o[key + "_p"] = Date.now(); latchWrite(o);
+    return true;
+  });
 }
 function markSent(key) {
-  const o = latchRead();
-  o[key] = Date.now();
-  latchWrite(o);
+  withFileLock(() => { const o = latchRead(); o[key] = Date.now(); delete o[key + "_p"]; latchWrite(o); });
 }
-function clearLatch() { latchWrite({}); }
+function release(key) {
+  withFileLock(() => { const o = latchRead(); delete o[key + "_p"]; latchWrite(o); });
+}
+function clearLatch() { withFileLock(() => latchWrite({})); }
+
+/* ───────────── চালু থাকার সময় (রিস্টার্টেও টিকে থাকে) ───────────── */
+const PROC_START = Date.now() - Math.round(process.uptime() * 1000);
+const RUN_START = (function () {
+  try {
+    const r = JSON.parse(require("fs").readFileSync(RUN_FILE, "utf8"));
+    // ৫ মিনিটের মধ্যে রিস্টার্ট হলে আগের সময় থেকেই গোনা চলবে
+    if (r && r.since && r.seen && PROC_START - r.seen < 5 * 60 * 1000) return r.since;
+  } catch (_) {}
+  return PROC_START;
+})();
+function saveRunInfo() {
+  try {
+    if (global.client && global.client.api)
+      require("fs").writeFileSync(RUN_FILE, JSON.stringify({ since: RUN_START, seen: Date.now() }));
+  } catch (_) {}
+}
+const fmtDate = (ms) => {
+  try { return new Date(ms).toLocaleString("en-GB", { timeZone: "Asia/Dhaka", hour12: true }); }
+  catch (_) { return new Date(ms).toISOString(); }
+};
 
 const state = global.__juwelAlert || (global.__juwelAlert = {
   started: false,
@@ -88,10 +144,7 @@ const state = global.__juwelAlert || (global.__juwelAlert = {
 });
 
 /* ───────────── helpers ───────────── */
-const dhakaTime = () => {
-  try { return new Date().toLocaleString("en-GB", { timeZone: "Asia/Dhaka", hour12: true }); }
-  catch (_) { return new Date().toISOString(); }
-};
+const dhakaTime = () => fmtDate(Date.now());
 const pad2 = (n) => String(n).padStart(2, "0");
 // সেকেন্ড থেকে দিন/ঘণ্টা/মিনিট/সেকেন্ড
 const uptimeParts = (sec) => {
@@ -193,31 +246,34 @@ const LINE = "━━━━━━━━━━━━━━━━━━━━";
 async function raiseAlert(reason) {
   const now = Date.now();
   if (!state.down) { state.down = true; state.downSince = now; }
-  if (!canSend("alert")) return; // আগেই একবার গেছে → আর নয়
+  if (!canSend("alert")) return; // আগেই একবার গেছে বা কেউ পাঠাচ্ছে
   // পাঠানো চলছে, বা আগের চেষ্টা ব্যর্থ হয়ে থাকলে ১ মিনিটের আগে আবার নয়
   if (state.alertSending || now - state.lastAlertAt < 60 * 1000) return;
+  if (!claim("alert")) return; // অন্য প্রসেস আগেই দখল নিয়েছে
   state.alertSending = true;
   state.lastAlertAt = now;
-  const upA = uptimeParts(process.uptime());
+  const upA = uptimeParts((now - RUN_START) / 1000);
   const text =
     HEAD("🚨 JUWEL BOT • ALERT") + "\n\n" +
     "🔴 STATUS ➤ SESSION PROBLEM\n" + LINE + "\n" +
     "📛 কারণ ➤ " + reason + "\n" + LINE + "\n" +
     "⏱ চালু ছিল\n" + uptimeLines(upA) + "\n" + LINE + "\n" +
+    "📅 STARTED ➤ " + fmtDate(RUN_START) + "\n" +
     "🕒 TIME ➤ " + dhakaTime() + "\n" + LINE + "\n" +
     "🛠 করণীয়: নতুন appstate.json (কুকি) বসিয়ে বট রিস্টার্ট দিন।";
   log("সতর্কতা: " + reason, "error");
   try {
     const ok = await sendExternal(text);
-    if (ok) markSent("alert");
-  } finally { state.alertSending = false; }
+    if (ok) markSent("alert"); else release("alert");
+  } catch (_) { release("alert"); }
+  finally { state.alertSending = false; }
 }
 
 // সমস্যা মিটে টানা ৫ মিনিট সুস্থ থাকলে একবার "BACK ONLINE" + লক খুলে দেয়
 async function raiseRecovery() {
-  const hadAlert = state.down || !canSend("alert");
   const o = latchRead();
-  const ts = Object.values(o).filter(Boolean);
+  const hadAlert = state.down || !!o.alert || !!o.stop;
+  const ts = [o.alert, o.stop].filter(Boolean);
   const since = state.downSince || (ts.length ? Math.min.apply(null, ts) : Date.now());
   const downFor = Date.now() - since;
   clearLatch(); // নতুন সমস্যা হলে আবার একবার নোটিশ যাবে
@@ -240,22 +296,16 @@ let stopPromise = null;
 // startMs/endMs দিলে সেটা দিয়ে uptime হিসাব হয় (watchdog ব্যবহার করে)
 function stopText(reason, startMs, endMs) {
   const end = endMs || Date.now();
-  const start = startMs || (end - process.uptime() * 1000);
+  const start = startMs || RUN_START;
   const up = uptimeParts((end - start) / 1000);
-  let started;
-  try { started = new Date(start).toLocaleString("en-GB", { timeZone: "Asia/Dhaka", hour12: true }); }
-  catch (_) { started = new Date(start).toISOString(); }
-  let stopped;
-  try { stopped = new Date(end).toLocaleString("en-GB", { timeZone: "Asia/Dhaka", hour12: true }); }
-  catch (_) { stopped = new Date(end).toISOString(); }
 
   return (
     HEAD("🔴 JUWEL BOT • STOPPED") + "\n\n" +
     "🔴 STATUS ➤ OFFLINE\n" + LINE + "\n" +
     "📛 কারণ ➤ " + reason + "\n" + LINE + "\n" +
     "⏱ চালু ছিল\n" + uptimeLines(up) + "\n" + LINE + "\n" +
-    "📅 STARTED ➤ " + started + "\n" +
-    "🕒 STOPPED ➤ " + stopped
+    "📅 STARTED ➤ " + fmtDate(start) + "\n" +
+    "🕒 STOPPED ➤ " + fmtDate(end)
   );
 }
 
@@ -283,14 +333,16 @@ function sendStopNotice(reason) {
   log("বট বন্ধ হচ্ছে: " + reason, "warn");
   watchSend("REASON:" + reason);
   heartbeatFail();
-  // এই সমস্যায় আগেই একবার STOPPED গেছে → আর পাঠাবে না (ওয়াচডগকেও জানিয়ে দেয়)
-  if (!canSend("stop")) {
+  // আগেই গেছে বা অন্য প্রসেস পাঠাচ্ছে → আর নয় (ওয়াচডগকেও জানিয়ে দেয়)
+  if (!claim("stop")) {
     watchSend("SENT");
     stopPromise = Promise.resolve(false);
     return stopPromise;
   }
   stopPromise = Promise.race([
-    sendExternal(stopText(reason)).then((ok) => { if (ok) { markSent("stop"); watchSend("SENT"); } return ok; }).catch(() => false),
+    sendExternal(stopText(reason))
+      .then((ok) => { if (ok) { markSent("stop"); watchSend("SENT"); } else release("stop"); return ok; })
+      .catch(() => { release("stop"); return false; }),
     new Promise((res) => setTimeout(res, STOP_NOTICE_WAIT_MS))
   ]);
   return stopPromise;
@@ -360,7 +412,7 @@ function startWatchdog() {
       windowsHide: true,
       env: Object.assign({}, process.env, {
         JW_PID: String(process.pid),
-        JW_START: String(Date.now() - Math.round(process.uptime() * 1000))
+        JW_START: String(RUN_START)
       })
     });
     child.on("error", () => {});
@@ -403,19 +455,27 @@ function runWatcher() {
     finishing = true;
     // বট মরে গেছে, তাই আর কোনো SENT আসবে না; পাইপের বাকি ডাটা পড়ার জন্য অল্প অপেক্ষা
     await new Promise((r) => setTimeout(r, 300));
-    // বট নিজে পাঠায়নি এবং এই সমস্যায় আগে STOPPED যায়নি — তখনই ওয়াচডগ পাঠাবে
-    if (!handled && canSend("stop")) {
-      const why = reason || crash ||
-        (exitCode !== null && exitCode !== "undefined"
-          ? "বট বন্ধ হয়েছে (exit code " + exitCode + ")"
-          : "হঠাৎ বন্ধ — kill -9 / মেমরি শেষ / হোস্ট জোর করে বন্ধ করেছে");
-      const msg = stopText(why + " [watchdog]", startMs, Date.now());
-      // একবার ব্যর্থ হলে আরও ২ বার চেষ্টা
-      for (let i = 0; i < 3; i++) {
-        let ok = false;
-        try { ok = await sendExternal(msg); } catch (_) {}
-        if (ok) { markSent("stop"); break; }
-        await new Promise((r) => setTimeout(r, 1500));
+    if (!handled) {
+      // বট নিজে পাঠানোর মাঝখানে মারা গেলে, তার দখলের মেয়াদ শেষ হওয়া পর্যন্ত অপেক্ষা
+      for (let i = 0; i < 25; i++) {
+        const p = latchRead().stop_p;
+        if (!p || Date.now() - p >= PENDING_MS) break;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      // বট নিজে পাঠায়নি এবং এই সমস্যায় আগে STOPPED যায়নি — তখনই ওয়াচডগ পাঠাবে
+      if (claim("stop")) {
+        const why = reason || crash ||
+          (exitCode !== null && exitCode !== "undefined"
+            ? "বট বন্ধ হয়েছে (exit code " + exitCode + ")"
+            : "হঠাৎ বন্ধ — kill -9 / মেমরি শেষ / হোস্ট জোর করে বন্ধ করেছে");
+        const msg = stopText(why + " [watchdog]", startMs, Date.now());
+        // একবার ব্যর্থ হলে আরও ২ বার চেষ্টা
+        let sentOk = false;
+        for (let i = 0; i < 3 && !sentOk; i++) {
+          try { sentOk = await sendExternal(msg); } catch (_) {}
+          if (!sentOk) await new Promise((r) => setTimeout(r, 1500));
+        }
+        if (sentOk) markSent("stop"); else release("stop");
       }
     }
     process.exit(0);
@@ -531,7 +591,8 @@ function probe() {
       } else {
         state.probeFails = 0; state.lastProbeOk = true;
         // সমস্যার পর টানা RECOVER_STABLE_MS সুস্থ থাকলে তবেই রিকভারি (বারবার ওঠানামায় নোটিশ যাবে না)
-        if (state.down || !canSend("alert") || !canSend("stop")) {
+        const o = latchRead();
+        if (state.down || o.alert || o.stop) {
           if (!state.okSince) state.okSince = Date.now();
           const stable = Date.now() - state.okSince >= RECOVER_STABLE_MS;
           const noRecentLock = Date.now() - (state.lockAt || 0) >= RECOVER_STABLE_MS;
@@ -566,13 +627,17 @@ function start() {
   installShutdownHook();
   startWatchdog();
   startHeartbeat();
+  saveRunInfo();
+  const rs = setInterval(saveRunInfo, 30 * 1000);
+  if (rs.unref) rs.unref();
   const t = setInterval(probe, PROBE_EVERY_MS);
   if (t.unref) t.unref();
 
   // চালু-নোটিশ: লগইন সফল হওয়ার পর (api পাওয়া গেলে) পাঠায়।
   // লগইন না হলে "চালু" নোটিশ যাবে না; সেক্ষেত্রে probe() সতর্কতা দেবে।
   const sendBoot = async () => {
-    if (!canSend("alert")) return; // আইডি লক/সেশন সমস্যা চলছে — "STARTED" নোটিশ নয়
+    const o = latchRead();
+    if (o.alert || o.stop || o.alert_p || o.stop_p) return; // আইডি লক/সেশন সমস্যা চলছে — "STARTED" নোটিশ নয়
     const text =
       HEAD("🟢 JUWEL BOT • STARTED") + "\n\n" +
       "🟢 STATUS ➤ ONLINE\n" + LINE + "\n" +
@@ -602,8 +667,7 @@ function start() {
 }
 
 function healthText() {
-  const up = uptimeParts(process.uptime());
-  const startedAt = new Date(Date.now() - process.uptime() * 1000);
+  const up = uptimeParts((Date.now() - RUN_START) / 1000);
   const probeTxt = state.lastProbeOk === null ? "PENDING" : state.lastProbeOk ? "✅ OK" : "❌ FAILED";
   const probeAgo = state.lastProbeAt ? " (" + fmtDur(Date.now() - state.lastProbeAt) + " ago)" : "";
   const tg = process.env.JUWEL_TG_TOKEN && process.env.JUWEL_TG_CHAT ? "ON ✅" : "OFF ❌";
@@ -612,15 +676,12 @@ function healthText() {
   const hb = process.env.JUWEL_HEARTBEAT_URL ? "ON ✅" : "OFF ❌";
   const ram = Math.round(process.memoryUsage().rss / 1048576);
   const cmds = global.client && global.client.commands ? global.client.commands.size : "?";
-  let started;
-  try { started = startedAt.toLocaleString("en-GB", { timeZone: "Asia/Dhaka", hour12: true }); }
-  catch (_) { started = startedAt.toISOString(); }
 
   return (
     HEAD("🤖 JUWEL BOT • STATUS") + "\n\n" +
     (state.down ? "🔴 STATUS ➤ PROBLEM" : "🟢 STATUS ➤ ONLINE") + "\n" + LINE + "\n" +
     "⏱ UPTIME\n" + uptimeLines(up) + "\n" + LINE + "\n" +
-    "📅 STARTED ➤ " + started + "\n" +
+    "📅 STARTED ➤ " + fmtDate(RUN_START) + "\n" +
     "🕒 NOW ➤ " + dhakaTime() + "\n" + LINE + "\n" +
     "🩺 HEALTH CHECK\n" +
     " ┌ RESULT ➤ " + probeTxt + probeAgo + "\n" +
@@ -638,12 +699,8 @@ function healthText() {
 
 /* ───────────── uptime ব্লক (test ও চালু-নোটিশে ব্যবহার হয়) ───────────── */
 function uptimeBlock() {
-  const up = uptimeParts(process.uptime());
-  const startedAt = new Date(Date.now() - process.uptime() * 1000);
-  let started;
-  try { started = startedAt.toLocaleString("en-GB", { timeZone: "Asia/Dhaka", hour12: true }); }
-  catch (_) { started = startedAt.toISOString(); }
-  return "⏱ UPTIME\n" + uptimeLines(up) + "\n" + LINE + "\n" + "📅 STARTED ➤ " + started;
+  const up = uptimeParts((Date.now() - RUN_START) / 1000);
+  return "⏱ UPTIME\n" + uptimeLines(up) + "\n" + LINE + "\n" + "📅 STARTED ➤ " + fmtDate(RUN_START);
 }
 
 /* ───────────── test notice (সাজানো) ───────────── */
@@ -723,7 +780,7 @@ const withCredit = (t) => fx(t) + "\n" + LINE + "\n" + infoBlock() + "\n" + LINE
 module.exports.config = {
   name: "juwelalert",
   aliases: ["jalert"],
-  version: "1.8.0",
+  version: "1.9.0",
   hasPermssion: 2,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "সেশন সতর্কতা ও বট চালু/বন্ধ নোটিশ",
@@ -757,4 +814,4 @@ if (IS_WATCHER) {
 } else {
   // ফাইল লোড হওয়ার সাথে সাথেই চালু — onLoad/handleEvent না চললেও নজরদারি কাজ করবে
   try { start(); } catch (e) { log("start ত্রুটি: " + e.message, "error"); }
-}
+  }
