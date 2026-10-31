@@ -6,10 +6,7 @@ const APIS = [
   "BACKUP_API_URL_HERE" // ব্যাকআপ API বসান (না থাকলে এই লাইন রেখে দিলেও চলবে)
 ].filter(u => u.startsWith("http"));
 
-const ONLY_VIP = true;          // true = শুধু নিচের লিস্টের ইউজার ব্যবহার করতে পারবে
-const VIP_IDS = [               // অ্যাডমিন/VIP এর Facebook ID
-  "100000000000000"
-];
+const ONLY_ADMIN = true;        // true = শুধু config.json এর ADMINBOT রা ব্যবহার করতে পারবে
 const BLOCKED_NUMBERS = [       // এই নম্বরগুলো সার্চ করা যাবে না (01XXXXXXXXX ফরম্যাটে)
   "01000000000"
 ];
@@ -101,11 +98,15 @@ module.exports = {
   run: async function ({ api, event, args }) {
     const { threadID, messageID, senderID } = event;
     const send = (msg) => api.sendMessage(msg, threadID, messageID);
-    const isVip = VIP_IDS.includes(String(senderID));
+
+    // config.json থেকে বট অ্যাডমিন লিস্ট
+    const cfg = (global.config) || {};
+    const admins = [...(cfg.ADMINBOT || []), ...(cfg.OPERATOR || [])].map(String);
+    const isVip = admins.includes(String(senderID));
 
     // পারমিশন চেক
-    if (ONLY_VIP && !isVip)
-      return send(box(["🔒 এই কমান্ড শুধু অ্যাডমিন/VIP দের জন্য!"]));
+    if (ONLY_ADMIN && !isVip)
+      return send(box(["🔒 এই কমান্ড শুধু বট অ্যাডমিনদের জন্য!"]));
 
     if (!args[0])
       return send(box(["⚠️ দয়া করে একটি নম্বর দিন!", "📌 ব্যবহার: numinfo 01XXXXXXXXX"]));
