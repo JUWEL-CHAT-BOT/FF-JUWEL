@@ -5,7 +5,7 @@ const request = require("request");
 module.exports.config = {
   name: "tiktok",
   version: "13.0.0",
-  hasPermssion: 3,
+  hasPermssion: 0, // ✅ সবাই চালাতে পারবে (আগে ছিল 3)
   credits: "M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "random tiktok video",
   commandCategory: "tiktok",
