@@ -6,7 +6,7 @@ const { execFile } = require("child_process");
 module.exports = {
   config: {
     name: "autodl",
-    version: "4.0.0",
+    version: "4.1.0",
     hasPermssion: 0,
     credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
     description: "Auto Video/MP3 Downloader (multi-link)",
@@ -48,6 +48,66 @@ module.exports = {
     const cleanTitle = (t) =>
       String(t || "").replace(/\s+/g, " ").trim().slice(0, 60);
 
+    //━━━━━━━━━━ STATS HELPERS ━━━━━━━━━━//
+    // "1.2K", "3,400", 5000, "5000" সব সংখ্যায় রূপান্তর
+    const parseNum = (v) => {
+      if (v === undefined || v === null || v === "" || typeof v === "object") return null;
+      if (typeof v === "number") return isFinite(v) ? v : null;
+      const s = String(v).trim().replace(/,/g, "").toUpperCase();
+      const m = s.match(/^([\d.]+)\s*([KMB])?$/);
+      if (!m) return null;
+      const mult = { K: 1e3, M: 1e6, B: 1e9 }[m[2]] || 1;
+      const n = Math.round(parseFloat(m[1]) * mult);
+      return isFinite(n) ? n : null;
+    };
+
+    // যেকোনো নেস্টেড জায়গা থেকে key খুঁজে বের করে
+    const deepPick = (obj, keys, depth = 0) => {
+      if (!obj || typeof obj !== "object" || depth > 5) return null;
+      const lower = keys.map((k) => k.toLowerCase());
+      for (const k of Object.keys(obj)) {
+        if (lower.includes(k.toLowerCase())) {
+          const n = parseNum(obj[k]);
+          if (n !== null) return n;
+        }
+      }
+      for (const k of Object.keys(obj)) {
+        if (obj[k] && typeof obj[k] === "object") {
+          const n = deepPick(obj[k], keys, depth + 1);
+          if (n !== null) return n;
+        }
+      }
+      return null;
+    };
+
+    const KEYS = {
+      views: ["views", "view", "view_count", "viewCount", "play_count", "playCount", "plays", "video_view_count"],
+      likes: ["likes", "like", "like_count", "likeCount", "digg_count", "diggCount", "favorite_count"],
+      comments: ["comments", "comment", "comment_count", "commentCount", "reply_count"],
+      shares: ["shares", "share", "share_count", "shareCount", "forward_count"]
+    };
+
+    const extractStats = (data) => ({
+      views: deepPick(data, KEYS.views),
+      likes: deepPick(data, KEYS.likes),
+      comments: deepPick(data, KEYS.comments),
+      shares: deepPick(data, KEYS.shares)
+    });
+
+    const STAT_KEYS = ["views", "likes", "comments", "shares"];
+
+    const mergeStats = (base, extra) => {
+      const out = { ...base };
+      for (const k of STAT_KEYS) {
+        if (out[k] === null || out[k] === undefined) out[k] = extra ? extra[k] : null;
+      }
+      return out;
+    };
+
+    const statsComplete = (s) =>
+      STAT_KEYS.every((k) => s[k] !== null && s[k] !== undefined);
+
+    //━━━━━━━━━━ FETCH INFO ━━━━━━━━━━//
     const fetchInfo = async (link, platform) => {
       const apis = [
         `https://api.samirthakuri10.workers.dev/alldl?url=${encodeURIComponent(link)}`,
@@ -55,45 +115,71 @@ module.exports = {
         `https://api.azadx69x.workers.dev/alldl?url=${encodeURIComponent(link)}`
       ];
 
-      for (const apiUrl of apis) {
+      let result = null;
+      let stats = { views: null, likes: null, comments: null, shares: null };
+
+      // TikTok হলে আগে tikwm (এখানে সব স্ট্যাটস পাওয়া যায়)
+      if (platform === "TikTok") {
         try {
-          const { data } = await axios.get(apiUrl, { timeout: 20000 });
+          const { data } = await axios.get(
+            `https://www.tikwm.com/api/?url=${encodeURIComponent(link)}`,
+            { timeout: 15000 }
+          );
+          if (data && data.data) {
+            const d = data.data;
+            stats = mergeStats(stats, {
+              views: parseNum(d.play_count),
+              likes: parseNum(d.digg_count),
+              comments: parseNum(d.comment_count),
+              shares: parseNum(d.share_count)
+            });
+            const v = d.hdplay || d.play;
+            if (v) {
+              result = {
+                videoUrl: String(v).startsWith("http") ? v : "https://www.tikwm.com" + v,
+                audioUrl: d.music || null,
+                title: cleanTitle(d.title || "TikTok Video")
+              };
+            }
+          }
+        } catch (err) {
+          console.log("[autodl] tikwm failed:", err.message);
+        }
+      }
+
+      for (const apiUrl of apis) {
+        // ভিডিও + সব স্ট্যাটস পেয়ে গেলে আর দরকার নেই
+        if (result && statsComplete(stats)) break;
+        try {
+          const { data } = await axios.get(apiUrl, { timeout: 15000 });
           if (!data) continue;
           const d = data.data || {};
 
-          const videoUrl =
-            data.url || data.video_url || data.download_url ||
-            d.url || d.high || d.video || d.hd ||
-            (data.links && (data.links.hd || data.links.sd)) ||
-            data.high || data.hd || data.video || null;
+          stats = mergeStats(stats, extractStats(data));
 
-          const audioUrl =
-            data.audio || data.audio_url || data.music ||
-            d.audio || d.music || d.audio_url || null;
+          if (!result) {
+            const videoUrl =
+              data.url || data.video_url || data.download_url ||
+              d.url || d.high || d.video || d.hd ||
+              (data.links && (data.links.hd || data.links.sd)) ||
+              data.high || data.hd || data.video || null;
 
-          if (videoUrl || audioUrl) {
-            const title = data.title || data.caption || data.desc || d.title || `${platform} Video`;
-            const pick = (...keys) => {
-              for (const o of [data, d]) {
-                for (const k of keys) {
-                  const v = o && o[k];
-                  if (v !== undefined && v !== null && v !== "" && !isNaN(Number(v))) return Number(v);
-                }
-              }
-              return null;
-            };
-            const stats = {
-              likes: pick("like", "likes", "like_count", "digg_count"),
-              comments: pick("comment", "comments", "comment_count"),
-              shares: pick("share", "shares", "share_count")
-            };
-            return { videoUrl, audioUrl, title: cleanTitle(title), stats };
+            const audioUrl =
+              data.audio || data.audio_url || data.music ||
+              d.audio || d.music || d.audio_url || null;
+
+            if (videoUrl || audioUrl) {
+              const title = data.title || data.caption || data.desc || d.title || `${platform} Video`;
+              result = { videoUrl, audioUrl, title: cleanTitle(title) };
+            }
           }
         } catch (err) {
           console.log("[autodl] API failed:", err.message);
         }
       }
-      return null;
+
+      if (!result) return null;
+      return { ...result, stats };
     };
 
     const downloadFile = async (url, dest) => {
@@ -164,10 +250,11 @@ module.exports = {
         ];
         if (stats) {
           lines.push(`┣━━━━━━━━━━━━━━━━━┫`);
-          if (has(stats.likes)) lines.push(`┃ ❤️ Likes  ➜  ${fmt(stats.likes)}`);
-          if (has(stats.comments)) lines.push(`┃ 💬 Comments  ➜  ${fmt(stats.comments)}`);
-          if (has(stats.shares)) lines.push(`┃ 🔁 Shares  ➜  ${fmt(stats.shares)}`);
-          if (lines[lines.length - 1].startsWith("┣")) lines.pop();
+          const show = (v) => (has(v) ? fmt(v) : "N/A");
+          lines.push(`┃ 👁️ Views  ➜  ${show(stats.views)}`);
+          lines.push(`┃ ❤️ Likes  ➜  ${show(stats.likes)}`);
+          lines.push(`┃ 💬 Comments  ➜  ${show(stats.comments)}`);
+          lines.push(`┃ 🔁 Shares  ➜  ${show(stats.shares)}`);
         }
         lines.push(`┣━━━━━━━━━━━━━━━━━┫`);
         lines.push(`┃ ⚡ Speed  ➜  ${time} sec`);
@@ -289,6 +376,10 @@ module.exports = {
               size = fs.statSync(videoPath).size;
               sendPath = videoPath;
             }
+          }
+          if (!sendPath) {
+            await send(ui.fail("অডিও/ভিডিও লিংক পাওয়া যায়নি"));
+            continue;
           }
         } else {
           if (!info.videoUrl) {
