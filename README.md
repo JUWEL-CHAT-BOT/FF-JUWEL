@@ -1,3 +1,18 @@
+<!-- ═══════════════ NEW VIDEO: HOW TO CREATE & RUN MESSENGER BOT ═══════════════ -->
+<p align="center">
+  <a href="https://youtu.be/kNHDYw8GoQg">
+    <img src="assets/bot-create-thumbnail.png" alt="কিভাবে Messenger Bot বানাবেন ও রান দিবেন? GitHub + Railway + Facebook" width="100%"/>
+  </a>
+</p>
+
+<p align="center"><b>▶️ ছবিতে ক্লিক করে YouTube টিউটোরিয়াল দেখুন — কিভাবে Messenger Bot বানাবেন ও রান দিবেন</b><br/>Click the image above to watch the step-by-step tutorial on YouTube.</p>
+
+<p align="center">
+  <a href="https://www.youtube.com/@BdBotTame"><img alt="BD Bot Team YouTube Channel" src="https://img.shields.io/badge/YouTube-BD_Bot_Team-FF0000?style=for-the-badge&logo=youtube&logoColor=white"></a>
+</p>
+
+---
+
 <!-- ═══════════════ HEADER WAVE ═══════════════ -->
 <p align="center">
   <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=12,14,18,24&height=240&section=header&text=JUWEL%20CHAT%20BOT&fontSize=62&fontColor=ffffff&animation=fadeIn&fontAlignY=36&desc=Ultra%20Premium%20Messenger%20Automation%20System&descSize=20&descAlignY=58" width="100%"/>
@@ -74,7 +89,7 @@
 <td align="center" width="25%">
 
 ### 🍪 Auto Cookie
-ব্রাউজার থেকে ফেসবুক কুকি নিজে নিয়ে `appstate.json` সবসময় নতুন রাখে।
+ব্রাউজার থেকে ফেসবুক. কুকি নিজে নিয়ে `appstate.json` সবসময় নতুন রাখে।
 
 </td>
 <td align="center" width="25%">
@@ -649,10 +664,6 @@ jobs:
 ---
 
 <h1 align="center">🚀 HOW TO RUN THIS CHAT BOT</h1>
-
-[![Watch the Video](https://i.imgur.com/EKtftdm.png)](https://youtu.be/blg0O7IgcrA?si=vpz42AK06uIblLN9)
-
-<p align="center"><b>▶️ ছবিতে ক্লিক করে YouTube টিউটোরিয়াল দেখুন</b><br/>Click the image above to watch the step-by-step tutorial on YouTube.</p>
 
 ### Steps to Run the Bot
 
