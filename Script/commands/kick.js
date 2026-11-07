@@ -1,94 +1,78 @@
+// ══════════════════════════════════════════════
+// Credit : 乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐
+// ══════════════════════════════════════════════
 module.exports.config = {
-	name: "kick",
-	version: "1.6.0",
-	hasPermssion: 1,
-	credits: "MR JUWEL",
-	description: "Ultra fast multi kick system",
-	commandCategory: "System",
-	usages: "[tag/reply]",
-	cooldowns: 2,
+  name: "kick",
+  version: "1.2.0",
+  hasPermssion: 2,
+  credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
+  description: "গ্রুপ থেকে মেম্বারকে কিক করা (শুধু বট অ্যাডমিন)",
+  commandCategory: "Admin",
+  usages: "kick @মেনশন | kick (রিপ্লাই করে) | kick <UID>",
+  cooldowns: 3
 };
 
-module.exports.run = async function ({ api, event }) {
-	try {
-		const threadID = event.threadID;
-		const botID = api.getCurrentUserID();
+module.exports.run = async function ({ api, event, args }) {
+  const { threadID, messageID } = event;
+  const botID = String(api.getCurrentUserID());
 
-		// গ্রুপের তথ্য আনা
-		const info = await api.getThreadInfo(threadID);
-		const adminIDs = (info.adminIDs || []).map(a => String(a.id || a));
+  // কাকে কিক করবে: রিপ্লাই + মেনশন + UID সব একসাথে মিলিয়ে নেবে
+  let targets = [];
+  if (event.messageReply && event.messageReply.senderID) {
+    targets.push(String(event.messageReply.senderID));
+  }
+  if (event.mentions && Object.keys(event.mentions).length > 0) {
+    targets.push(...Object.keys(event.mentions).map(String));
+  }
+  targets.push(...args.filter(a => /^\d{8,}$/.test(a)).map(String));
+  targets = [...new Set(targets)]; // একই জনকে দুইবার নয়
 
-		// বট এডমিন কিনা চেক
-		if (!adminIDs.includes(String(botID))) {
-			return api.sendMessage(
-				"❌ আমি এই গ্রুপের এডমিন না!\nআগে আমাকে এডমিন বানান, তারপর কিক করতে পারবো।",
-				threadID,
-				event.messageID
-			);
-		}
+  if (targets.length === 0) {
+    return api.sendMessage(
+      "❌ কাকে কিক করব?\n\n📌 ব্যবহার (একসাথে অনেকজনও চলবে):\n• /kick @জন১ @জন২\n• /kick <UID১> <UID২>\n• /kick @জন১ <UID২>\n• কারো মেসেজে রিপ্লাই করে /kick",
+      threadID, messageID
+    );
+  }
 
-		let targetIDs = [];
+  // গ্রুপের তথ্য ও বট অ্যাডমিন কি না চেক
+  let info;
+  try {
+    info = await api.getThreadInfo(threadID);
+  } catch (e) {
+    return api.sendMessage("⚠️ গ্রুপের তথ্য আনা যায়নি, পরে আবার চেষ্টা করুন।", threadID, messageID);
+  }
 
-		if (event.type === "message_reply") {
-			targetIDs.push(event.messageReply.senderID);
-		}
+  const groupAdmins = (info.adminIDs || []).map(a => String(a.id || a));
+  if (!groupAdmins.includes(botID)) {
+    return api.sendMessage("⚠️ আগে আমাকে এই গ্রুপের অ্যাডমিন বানান, তারপর কিক করতে পারব।", threadID, messageID);
+  }
 
-		if (event.mentions) {
-			targetIDs = targetIDs.concat(Object.keys(event.mentions));
-		}
+  const cfg = global.config || {};
+  const protectedIDs = [
+    botID,
+    ...(cfg.ADMINBOT || []).map(String),
+    ...(cfg.DEVELOPER || []).map(String)
+  ];
 
-		targetIDs = [...new Set(targetIDs.map(String))];
+  let done = 0, skipped = 0, failed = 0;
+  for (const uid of targets) {
+    // বট নিজে, বট অ্যাডমিন বা ডেভেলপারকে কিক করা যাবে না
+    if (protectedIDs.includes(uid)) { skipped++; continue; }
+    // গ্রুপে আছে কি না
+    if (info.participantIDs && !info.participantIDs.map(String).includes(uid)) { failed++; continue; }
 
-		if (targetIDs.length === 0)
-			return api.sendMessage("⚠️ Reply or tag someone!", threadID, event.messageID);
+    try {
+      await api.removeUserFromGroup(uid, threadID);
+      done++;
+      await new Promise(r => setTimeout(r, 1000));
+    } catch (e) {
+      failed++;
+    }
+  }
 
-		// বট নিজেকে বা অন্য এডমিনকে কিক করা আটকানো
-		const skipped = [];
-		const validIDs = targetIDs.filter(id => {
-			if (id === String(botID) || adminIDs.includes(id)) {
-				skipped.push(id);
-				return false;
-			}
-			return true;
-		});
-
-		if (validIDs.length === 0)
-			return api.sendMessage("⚠️ এডমিন বা বটকে কিক করা যাবে না!", threadID, event.messageID);
-
-		await api.sendMessage(
-			`⚡ KICK STARTED\n👥 Total: ${validIDs.length}\n🚀 Fast mode ON`,
-			threadID
-		);
-
-		let kicked = 0;
-		let failed = 0;
-
-		// কলব্যাক দিয়ে আসল রেজাল্ট ধরা
-		await Promise.all(
-			validIDs.map(id =>
-				new Promise(resolve => {
-					api.removeUserFromGroup(id, threadID, (err) => {
-						if (err) failed++;
-						else kicked++;
-						resolve();
-					});
-				})
-			)
-		);
-
-		return api.sendMessage(
-			`╭──── FAST RESULT ────╮\n` +
-			`│ 👥 Total: ${validIDs.length}\n` +
-			`│ ✅ Kicked: ${kicked}\n` +
-			`│ ❌ Failed: ${failed}\n` +
-			`│ ⏭️ Skipped (admin): ${skipped.length}\n` +
-			`│ ⚡ Mode: Ultra Fast\n` +
-			`╰────────────────────╯`,
-			threadID
-		);
-
-	} catch (err) {
-		console.log(err);
-		return api.sendMessage("❌ Kick error!", event.threadID);
-	}
+  let msg = `┏━━━━━━━━━━━━━━━┓\n┃ 🦵 KICK রিপোর্ট\n┣━━━━━━━━━━━━━━━┫\n┃ ✅ কিক হয়েছে: ${done}\n`;
+  if (skipped) msg += `┃ 🛡️ সুরক্ষিত (বাদ): ${skipped}\n`;
+  if (failed) msg += `┃ ⚠️ ব্যর্থ: ${failed}\n`;
+  msg += `┗━━━━━━━━━━━━━━━┛`;
+  return api.sendMessage(msg, threadID, messageID);
 };
