@@ -1,153 +1,196 @@
 module.exports.config = {
   name: "fbkick",
-  version: "13.0.1",
+  version: "14.0.0",
   hasPermission: 2,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
-  description: "Premium FB User Cleaner",
+  description: "Disabled/Suspended FB ID Cleaner",
   commandCategory: "group",
   usages: "fbkick",
   cooldowns: 5
 };
 
-module.exports.run = async function ({ api, event }) {
-
-  const { threadID, messageID, senderID } = event;
-
-  // ✅ ADMIN CHECK
-  if (!global.config.ADMINBOT.includes(senderID)) {
-    return api.sendMessage(
-`╔━━❖ ❌ ACCESS DENIED ❖━━╗
-┃
-┃ শুধুমাত্র BOT ADMIN
-┃ এই কমান্ড ব্যবহার করতে পারবে।
-┃
-╚━━━━━━━━━━━━━━━━━━╝`,
-      threadID, messageID
-    );
-  }
-
-  // ✅ THREAD INFO
-  const threadInfo = await api.getThreadInfo(threadID);
-  const botID = api.getCurrentUserID();
-
-  // ✅ FIX: adminIDs কে সবসময় id string array তে কনভার্ট করো
-  const adminIDList = (threadInfo.adminIDs || []).map(a =>
-    typeof a === "string" ? a : a.id
-  );
-
-  // ✅ DETECT BAD USERS
-  const badUsers = threadInfo.userInfo.filter(user => {
-    if (user.id == senderID) return false;
-    if (user.id == botID) return false;
-    if (adminIDList.includes(user.id)) return false;   // FIXED
-
-    const noGender = user.gender === undefined || user.gender === null;
-    const noThumb = !user.thumbSrc || user.thumbSrc.includes("defaultUser");
-    const noName = !user.name || user.name.trim() === "";
-
-    return noGender || (noThumb && noName);
+// ---------- Promise wrappers (fca callback style) ----------
+const call = (fn, ...args) =>
+  new Promise((resolve, reject) => {
+    fn(...args, (err, data) => (err ? reject(err) : resolve(data)));
   });
 
-  // ✅ BOT ADMIN CHECK (FIXED)
-  const botAdmin = adminIDList.includes(botID);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-  // ✅ NO BAD USER
+// Disabled / suspended / deleted অ্যাকাউন্টের ডিফল্ট নাম
+const DEAD_NAMES = [
+  "facebook user",
+  "facebook ব্যবহারকারী",
+  "ফেসবুক ইউজার",
+  "ফেসবুক ব্যবহারকারী",
+  "usuario de facebook",
+  "utilisateur facebook"
+];
+
+function isDeadName(name) {
+  if (!name) return true;
+  const n = name.trim().toLowerCase();
+  return n === "" || DEAD_NAMES.includes(n);
+}
+
+function isDefaultThumb(src) {
+  return !src || src.includes("defaultUser") || src.includes("silhouette");
+}
+
+function isBadAccount(info) {
+  if (!info) return true; // getUserInfo কোনো তথ্যই দেয়নি
+
+  const noGender = info.gender === undefined || info.gender === null;
+  const noThumb = isDefaultThumb(info.thumbSrc);
+  const noProfile = !info.vanity && !info.profileUrl;
+
+  // ১) নাম "Facebook User" / ফাঁকা
+  if (isDeadName(info.name)) return true;
+
+  // ২) নাম আছে, কিন্তু gender + ছবি + প্রোফাইল সব ফাঁকা
+  return noGender && noThumb && noProfile;
+}
+
+async function fetchUserInfoBatch(api, ids) {
+  const result = {};
+  const CHUNK = 40;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    try {
+      const data = await call(api.getUserInfo, chunk);
+      Object.assign(result, data || {});
+    } catch (e) {
+      console.log("getUserInfo chunk failed:", e);
+    }
+    await sleep(800);
+  }
+  return result;
+}
+
+module.exports.run = async function ({ api, event }) {
+  const { threadID, messageID, senderID } = event;
+  const send = (msg, reply = true) =>
+    api.sendMessage(msg, threadID, reply ? messageID : undefined);
+
+  // ---------- ADMIN CHECK ----------
+  if (!global.config.ADMINBOT.includes(senderID)) {
+    return send(
+`╔━━❖ ❌ ACCESS DENIED ❖━━╗
+┃ শুধুমাত্র BOT ADMIN
+┃ এই কমান্ড ব্যবহার করতে পারবে।
+╚━━━━━━━━━━━━━━━━━━╝`);
+  }
+
+  // ---------- THREAD INFO ----------
+  let threadInfo;
+  try {
+    threadInfo = await call(api.getThreadInfo, threadID);
+  } catch (e) {
+    return send("❌ গ্রুপের তথ্য আনা যায়নি, আবার চেষ্টা করুন।");
+  }
+
+  const botID = api.getCurrentUserID();
+  const adminIDList = (threadInfo.adminIDs || []).map(a =>
+    String(typeof a === "string" ? a : a.id)
+  );
+  const botAdmin = adminIDList.includes(String(botID));
+  const botOwners = (global.config.ADMINBOT || []).map(String);
+
+  // ---------- সব মেম্বারের ID (userInfo + participantIDs মিলিয়ে) ----------
+  const allIDs = new Set([
+    ...(threadInfo.participantIDs || []).map(String),
+    ...(threadInfo.userInfo || []).map(u => String(u.id))
+  ]);
+
+  // থ্রেডের userInfo ম্যাপ
+  const threadUserMap = {};
+  (threadInfo.userInfo || []).forEach(u => (threadUserMap[String(u.id)] = u));
+
+  const candidates = [...allIDs].filter(
+    id =>
+      id !== String(senderID) &&
+      id !== String(botID) &&
+      !adminIDList.includes(id) &&
+      !botOwners.includes(id)
+  );
+
+  await send(`🔍 ${candidates.length} জন মেম্বার স্ক্যান করা হচ্ছে...`);
+
+  // ---------- ডাবল চেক: getUserInfo দিয়ে ফ্রেশ ডেটা ----------
+  const freshInfo = await fetchUserInfoBatch(api, candidates);
+
+  const badUsers = [];
+  for (const id of candidates) {
+    const fresh = freshInfo[id];
+    const old = threadUserMap[id];
+
+    // fresh ও thread — দুই সোর্সেই খারাপ হলে তবেই bad (ভুল কিক কমাতে)
+    const badFresh = isBadAccount(fresh);
+    const badOld = old ? isBadAccount(old) : true;
+
+    if (badFresh && badOld) {
+      badUsers.push({
+        id,
+        name: (fresh && fresh.name) || (old && old.name) || id
+      });
+    }
+  }
+
   if (badUsers.length === 0) {
-    return api.sendMessage(
+    return send(
 `╔━━❖ ✅ GROUP CLEAN ❖━━╗
-┃
-┃ গ্রুপে কোনো নষ্ট আইডি নেই 🌸
-┃ গ্রুপ সম্পূর্ণ পরিষ্কার আছে।
-┃
-╚━━━━━━━━━━━━━━━━━━╝`,
-      threadID, messageID
-    );
+┃ কোনো disabled/suspended
+┃ আইডি পাওয়া যায়নি 🌸
+╚━━━━━━━━━━━━━━━━━━╝`);
   }
 
-  // ✅ যদি বট এডমিন না থাকে
   if (!botAdmin) {
-    return api.sendMessage(
+    return send(
 `╔━━❖ 🔍 SCAN COMPLETE ❖━━╗
+┃ ${badUsers.length} জন নষ্ট আইডি পাওয়া গেছে!
 ┃
-┃ গ্রুপে মোট ${badUsers.length} জন
-┃ নষ্ট আইডি পাওয়া গেছে! 😈
-┃
-┣━━━━━━━━━━━━━━━━━━
-┃ ⚠️ কিন্তু আমাকে গ্রুপে
-┃    এডমিন বানাননি!
-┃
-┃ 📌 দয়া করে আগে আমাকে
-┃    এডমিন বানান।
-┃
-╚━━━━━━━━━━━━━━━━━━╝`,
-      threadID, messageID
-    );
+┃ ⚠️ কিন্তু আমি এই গ্রুপে
+┃ এডমিন নই। আগে এডমিন বানান।
+╚━━━━━━━━━━━━━━━━━━╝`);
   }
 
-  // ✅ SCAN RESULT — ১০ সেকেন্ড কাউন্টডাউন
-  await api.sendMessage(
+  await send(
 `╔━━❖ 🔍 SCAN COMPLETE ❖━━╗
-┃
-┃ গ্রুপে মোট ${badUsers.length} জন
-┃ নষ্ট আইডি পাওয়া গেছে! 😈
-┃
-┣━━━━━━━━━━━━━━━━━━
-┃ ⏳ ১০ সেকেন্ড পর অটো কিক
-┃    শুরু হবে...
-┃
-╚━━━━━━━━━━━━━━━━━━╝`,
-    threadID, messageID
-  );
+┃ নষ্ট আইডি : ${badUsers.length} জন
+┃ ⏳ ১০ সেকেন্ড পর কিক শুরু...
+╚━━━━━━━━━━━━━━━━━━╝`);
 
-  await new Promise(r => setTimeout(r, 10000));
+  await sleep(10000);
 
-  await api.sendMessage(
-`╔━━❖  FB CLEANER ❖━━╗
-┃
-┃ 👥 নষ্ট আইডি : ${badUsers.length} জন
-┃
-┃ ⚡ কিক শুরু হচ্ছে...
-┃ 🛡️ একটু অপেক্ষা করুন...
-┃
-╚━━━━━━━━━━━━━━━━━━╝`,
-    threadID
-  );
-
+  // ---------- KICK (retry সহ) ----------
   let success = 0;
-  let failed = 0;
   const failedList = [];
 
   for (const user of badUsers) {
-    try {
-      await api.removeUserFromGroup(user.id, threadID);
-      success++;
-    } catch (err) {
-      failed++;
-      failedList.push(user.name || user.id);
-      console.log(`❌ Kick failed [${user.id}]:`, err);
+    let done = false;
+    for (let attempt = 1; attempt <= 2 && !done; attempt++) {
+      try {
+        await call(api.removeUserFromGroup, user.id, threadID);
+        done = true;
+      } catch (err) {
+        console.log(`❌ Kick failed [${user.id}] attempt ${attempt}:`, err);
+        await sleep(2500);
+      }
     }
-    await new Promise(r => setTimeout(r, 1500));
+    if (done) success++;
+    else failedList.push(user.name);
+    await sleep(1800);
   }
 
-  let failedNames = failedList.length > 0
-    ? `┃\n┃ ⚠️ ফেল হওয়া আইডি:\n${failedList.map(n => `┃   • ${n}`).join("\n")}\n`
+  const failed = failedList.length;
+  const failedNames = failed
+    ? `\n⚠️ ফেল হওয়া আইডি:\n${failedList.slice(0, 20).map(n => `  • ${n}`).join("\n")}\n`
     : "";
 
-  return api.sendMessage(
+  return send(
 `╔━━❖ ✅ KICK COMPLETE ❖━━╗
-┃
-┣━━━━━━━━━━━━━━━━━━
-┃ 👥 মোট নষ্ট আইডি  : ${badUsers.length} জন
-┃ ✅ সফলভাবে কিক    : ${success} জন
-┃ ❌ কিক ফেল        : ${failed} জন
-┃
-${failedNames}┣━━━━━━━━━━━━━━━━━━
-┃ 🔥 ${success} জন ফেসবুক ইউজার
-┃    নষ্ট আইডি কিক দেওয়া হয়েছে!
-┃
-┃ 🛡️ গ্রুপ পরিষ্কার হয়ে গেছে
-┃
-╚━━❖ POWERED BY BOT ❖━━╝`,
-    threadID, messageID
-  );
+┃ 👥 মোট নষ্ট আইডি : ${badUsers.length} জন
+┃ ✅ সফল কিক       : ${success} জন
+┃ ❌ ফেল           : ${failed} জন
+╚━━━━━━━━━━━━━━━━━━╝${failedNames}`);
 };
