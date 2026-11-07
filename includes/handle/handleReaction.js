@@ -72,8 +72,10 @@ module.exports = function ({ api, models, Users, Threads, Currencies }) {
       return;
     }
 
-    // ❌ আনসেন্ড
-    if (reaction === '❌') {
+    // ❌ 🤬 😡 😠 😤 আনসেন্ড
+    // নতুন ইমোজি যোগ করতে চাইলে শুধু এই অ্যারেতে বসিয়ে দিন
+    const unsendReactions = ['❌', '🤬', '😡', '😠', '😤'];
+    if (reaction && unsendReactions.some(r => String(reaction).includes(r))) {
       return api.unsendMessage(messageID);
     }
 
