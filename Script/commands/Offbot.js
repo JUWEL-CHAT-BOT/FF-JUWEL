@@ -1,6 +1,6 @@
 module.exports.config = {
 	name: "offbot",
-	version: "2.0.0",
+	version: "2.1.0",
 	hasPermssion: 2,
 	credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
 	description: "Turn the bot off",
@@ -12,12 +12,10 @@ const startTime = global.botStartTime || (global.botStartTime = Date.now());
 
 module.exports.run = async ({ event, api }) => {
 
-	const permission = [
-		"61594400795920",
-		"61567576882007"
-	];
+	// কনফিগারেশন (config.json) এর ADMINBOT লিস্ট থেকে অ্যাডমিন নেওয়া হচ্ছে
+	const adminBot = (global.config.ADMINBOT || []).map(String);
 
-	if (!permission.includes(event.senderID)) {
+	if (!adminBot.includes(String(event.senderID))) {
 		return api.sendMessage(
 			"❌ | You don't have permission to use this command.",
 			event.threadID,
