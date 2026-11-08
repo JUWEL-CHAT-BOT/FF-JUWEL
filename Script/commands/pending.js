@@ -1,12 +1,13 @@
 const fs = require("fs-extra");
 const path = require("path");
+const approval = require("../../includes/approval");
 
 const ADDER_CACHE_FILE = path.join(__dirname, "adderCache.json");
 
 module.exports.config = {
   name: "pending",
-  version: "1.3.0",
-  credits: "𝐌𝐑 𝐉𝐔𝐖𝐄𝐋",
+  version: "1.6.0",
+  credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   hasPermssion: 2,
   description: "Manage bot's pending group requests",
   commandCategory: "system",
@@ -67,9 +68,22 @@ function loadAdderCache() {
   return {};
 }
 
+// 📜 গ্রুপের হিস্ট্রি আনা (Promise হিসেবে)
+function getHistory(api, threadID, amount) {
+  return new Promise(resolve => {
+    try {
+      api.getThreadHistory(threadID, amount, undefined, (err, history) => {
+        resolve(err ? [] : history || []);
+      });
+    } catch (e) {
+      resolve([]);
+    }
+  });
+}
+
 // ===================================================
 // কে অ্যাড করেছে সেটা বের করার ফাংশন
-// ক্রম: cache -> snippetSender -> approvalQueue -> adminIDs
+// ক্রম: cache -> log:subscribe হিস্ট্রি -> snippetSender (শেষ উপায়)
 // ===================================================
 async function resolveAdder(api, group, adderCache) {
   const botID = String(api.getCurrentUserID());
@@ -83,25 +97,26 @@ async function resolveAdder(api, group, adderCache) {
     name = cached.name || null;
   }
 
-  // 2) thread list এর snippetSender (শেষ লগ মেসেজের প্রেরক)
-  if (!id && group.snippetSender && String(group.snippetSender) !== botID) {
-    id = String(group.snippetSender);
+  // 2) হিস্ট্রি থেকে "বটকে অ্যাড করা" লগ খোঁজা (সবচেয়ে নির্ভরযোগ্য)
+  if (!id) {
+    const history = await getHistory(api, group.threadID, 50);
+    for (let i = history.length - 1; i >= 0; i--) {
+      const m = history[i];
+      if (m.type !== "event" || m.logMessageType !== "log:subscribe") continue;
+
+      const added = (m.logMessageData && m.logMessageData.addedParticipants) || [];
+      const botAdded = added.some(p => String(p.userFbId || p.userId || p.id) === botID);
+
+      if (botAdded && m.author && String(m.author) !== botID) {
+        id = String(m.author);
+        break;
+      }
+    }
   }
 
-  // 3) threadInfo: approvalQueue -> adminIDs
-  if (!id) {
-    try {
-      const info = await api.getThreadInfo(group.threadID);
-
-      if (info.approvalQueue && info.approvalQueue.length > 0) {
-        id = String(info.approvalQueue[0].requesterID);
-      } else if (info.adminIDs && info.adminIDs.length > 0) {
-        const a = info.adminIDs[0];
-        id = String(a.id || a);
-      }
-    } catch (e) {
-      console.log("[pending] getThreadInfo failed:", group.threadID, e.message || e);
-    }
+  // 3) শেষ উপায়
+  if (!id && group.snippetSender && String(group.snippetSender) !== botID) {
+    id = String(group.snippetSender);
   }
 
   // নাম আনা (ফেইল করলেও আইডি/লিংক থাকবে)
@@ -145,6 +160,7 @@ module.exports.handleReply = async function ({ api, event, handleReply, getText 
       }
 
       try {
+        approval.remove(handleReply.pending[index - 1].threadID);
         await api.removeUserFromGroup(api.getCurrentUserID(), handleReply.pending[index - 1].threadID);
         count++;
       } catch (e) {}
@@ -164,45 +180,63 @@ module.exports.handleReply = async function ({ api, event, handleReply, getText 
       }
 
       const groupID = handleReply.pending[index - 1].threadID;
+      approval.approve(groupID, event.senderID);
       count++;
 
       try {
-        // 🔥 NOTI BOX 1
-        await api.sendMessage(
-          `চ্ঁলে্ঁ এ্ঁসে্ঁছি্ঁ ⎯꯭𓆩꯭𝆺𝅥😻⃞𝐑⃞𝐈⃞𝐘⃞𝐀⃞༢࿐ এঁখঁনঁ তোঁমাঁদেঁরঁ সাঁথেঁ আঁড্ডাঁ দিঁবঁ..!😘`,
-          groupID
-        );
-
-        // 🔥 বটের নিকনেম সেট
+        // 🔥 বটের নিকনেম সেট (config.json এর BOTNAME থেকে)
         try {
-          await api.changeNickname(
-            "⎯꯭𓆩꯭𝆺𝅥😻⃞𝐑⃞𝐈⃞𝐘⃞𝐀⃞༢࿐",
-            groupID,
-            api.getCurrentUserID()
-          );
+          const botName = global.config.BOTNAME;
+          if (botName) {
+            await api.changeNickname(botName, groupID, api.getCurrentUserID());
+          }
         } catch (e) {}
 
         await new Promise(r => setTimeout(r, 800));
 
         // 🔥 NOTI BOX 2
+        // config.json এর ADMINBOT এর ১ নাম্বার UID থেকে প্রোফাইল ও ইনবক্স লিংক
+        const ownerUID = String((global.config.ADMINBOT || [])[0] || "");
+        const fbLink = ownerUID ? `https://www.facebook.com/${ownerUID}` : "N/A";
+        const inboxLink = ownerUID ? `https://m.me/${ownerUID}` : "N/A";
+        const prefix = global.config.PREFIX;
+        const botName = global.config.BOTNAME || "Bot";
+
         await api.sendMessage(
-          `╭•┄┅═══❁🌺❁═══┅┄•╮
-আ্ঁস্ঁসা্ঁলা্ঁমু্ঁ💚আ্ঁলা্ঁই্ঁকু্ঁম্ঁ
-╰•┄┅═══❁🌺❁═══┅┄•╯
+          `┏━━━━━━━━━━━━━━━━━━━┓
+┃  👑 𝐁𝐎𝐓 𝐒𝐔𝐂𝐂𝐄𝐒𝐒𝐅𝐔𝐋𝐋𝐘 𝐀𝐃𝐃𝐄𝐃 👑
+┗━━━━━━━━━━━━━━━━━━━┛
 
-𝐓𝐡𝐚𝐧𝐤 𝐲𝐨𝐮 𝐬𝐨 𝐦𝐮𝐜𝐡 𝐟𝐨𝐫 𝐚𝐝𝐝𝐢𝐧𝐠 𝐦𝐞 𝐭𝐨 𝐲𝐨𝐮𝐫 𝐠𝐫𝐨𝐮𝐩! 🖤🤗
-𝐈 𝐰𝐢𝐥𝐥 𝐚𝐥𝐰𝐚𝐲𝐬 𝐬𝐞𝐫𝐯𝐞 𝐲𝐨𝐮 𝐢𝐧𝐬𝐡𝐚𝐀𝐥𝐥𝐚𝐡 🌺❤️
+আসসালামু আলাইকুম সবাইকে 💚
 
-𝐂𝐨𝐦𝐦𝐚𝐧𝐝 𝐋𝐢𝐬𝐭:
-${global.config.PREFIX}help
-${global.config.PREFIX}info
-${global.config.PREFIX}admin
+📢 𝗔𝘁𝘁𝗲𝗻𝘁𝗶𝗼𝗻 𝗘𝘃𝗲𝗿𝘆𝗼𝗻𝗲!
+এই গ্রুপে ${botName} বট সফলভাবে
+যুক্ত ও সক্রিয় করা হয়েছে ✅
+এখন থেকে সবাই বটের সব কমান্ড
+ব্যবহার করতে পারবেন 🎉
 
-➤ Messenger: m.me/mrjuwel444
-➤ WhatsApp: +8801943488192
+┏━━━━━━━━━━━━━━━━━━━┓
+┃ 🤖 Bot Status : ✅ Online
+┃ 🎯 Prefix     : ${prefix}
+┃ 📦 Commands   : ${prefix}help
+┗━━━━━━━━━━━━━━━━━━━┛
 
-❖⋆══════════════⋆❖
-𝐎𝐰𝐧𝐞𝐫➢乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐`,
+📌 কীভাবে ব্যবহার করবেন?
+📜 ${prefix}help  ➜ সব কমান্ডের লিস্ট
+ℹ️ ${prefix}info  ➜ বটের তথ্য
+👑 ${prefix}admin ➜ অ্যাডমিনের তথ্য
+
+⚠️ নিয়ম: বটকে স্প্যাম করবেন না।
+কোনো সমস্যা হলে অ্যাডমিনকে জানান 🌸
+
+━━━━━━━━━━━━━━━━━━━━
+👑 𝐎𝐰𝐧𝐞𝐫 ➢ 乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐
+
+💬 Profile : ${fbLink}
+📥 Inbox   : ${inboxLink}
+📱 WhatsApp: +8801943488192
+━━━━━━━━━━━━━━━━━━━━
+💚 ধন্যবাদ, ভালো থাকবেন সবাই 💚`,
           groupID
         );
       } catch (e) {}
@@ -217,11 +251,20 @@ ${global.config.PREFIX}admin
 // ===================================================
 // run : pending লিস্ট দেখানো
 // ===================================================
-module.exports.run = async function ({ api, event, getText }) {
+module.exports.run = async function ({ api, event, args, getText }) {
   const { threadID, messageID, senderID } = event;
 
   if (!isAdmin(senderID)) {
     return api.sendMessage(getText("noPermission"), threadID, messageID);
+  }
+
+  // /pending <গ্রুপ আইডি> দিলে সরাসরি অনুমোদন
+  if (args && /^\d{8,}$/.test(args[0] || "")) {
+    const ok = await approval.approveById(api, args[0], senderID);
+    return api.sendMessage(
+      ok ? `✅ ${args[0]} গ্রুপ অনুমোদিত হয়েছে।` : `⚠️ ${args[0]} অনুমোদিত হয়েছে, কিন্তু গ্রুপে মেসেজ পাঠানো যায়নি।`,
+      threadID, messageID
+    );
   }
 
   try {
