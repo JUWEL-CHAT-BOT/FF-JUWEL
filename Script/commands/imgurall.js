@@ -1,7 +1,7 @@
 module.exports.config = {
   name: "imgurall",
   version: "3.0.0",
-  hasPermssion: 3,
+  hasPermssion: 2,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "কমান্ড মেসেজ থেকে উপরের দিকে গ্রুপের শেষ N টি মিডিয়া Imgur লিংক বানাবে (admin only). Usage: imgurall 10",
   commandCategory: "other",
