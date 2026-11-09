@@ -1,11 +1,12 @@
 const fs = require("fs-extra");
 const path = require("path");
+const approval = require("../../includes/approval");
 
 const ADDER_CACHE_FILE = path.join(__dirname, "adderCache.json");
 
 module.exports.config = {
   name: "pending",
-  version: "1.3.0",
+  version: "3.0.0",
   credits: "𝐌𝐑 𝐉𝐔𝐖𝐄𝐋",
   hasPermssion: 2,
   description: "Manage bot's pending group requests",
@@ -28,7 +29,7 @@ module.exports.languages = {
 ┗━━━━━━━━━━━━━━━┛`,
 
     "approveSuccess": `┏━━━━━━━━━━━━━━━┓
-┃ ✅ APPROVED     ┃
+┃ ✅ SUCCESS      ┃
 ┣━━━━━━━━━━━━━━━┫
 ┃ %1 group approved
 ┗━━━━━━━━━━━━━━━┛`,
@@ -54,7 +55,7 @@ module.exports.languages = {
 
 // 🔒 ADMIN CHECK
 function isAdmin(senderID) {
-  return global.config.ADMINBOT.includes(senderID);
+  return approval.isAdmin(senderID);
 }
 
 // 📂 cache লোড
@@ -67,32 +68,51 @@ function loadAdderCache() {
   return {};
 }
 
+// callback ও promise দুই স্টাইলে গ্রুপ থেকে বের হওয়া
+function leaveThread(api, botID, tid) {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const cb = err => {
+      if (done) return;
+      done = true;
+      err ? reject(err) : resolve();
+    };
+    try {
+      const r = api.removeUserFromGroup(botID, tid, cb);
+      if (r && typeof r.then === "function") r.then(() => cb(), cb);
+    } catch (e) {
+      cb(e);
+    }
+  });
+}
+
 // ===================================================
-// কে অ্যাড করেছে সেটা বের করার ফাংশন
-// ক্রম: cache -> snippetSender -> approvalQueue -> adminIDs
+// কে অ্যাড করেছে বের করা
+// ক্রম: approval -> cache -> snippetSender -> approvalQueue -> adminIDs
 // ===================================================
 async function resolveAdder(api, group, adderCache) {
   const botID = String(api.getCurrentUserID());
   let id = null;
   let name = null;
 
-  // 1) cache
+  try {
+    const p = approval.getPendingInfo(group.threadID);
+    if (p && p.by && p.by !== "seed") id = String(p.by);
+  } catch (_) {}
+
   const cached = adderCache[group.threadID];
-  if (cached && cached.id) {
+  if (!id && cached && cached.id) {
     id = String(cached.id);
     name = cached.name || null;
   }
 
-  // 2) thread list এর snippetSender (শেষ লগ মেসেজের প্রেরক)
   if (!id && group.snippetSender && String(group.snippetSender) !== botID) {
     id = String(group.snippetSender);
   }
 
-  // 3) threadInfo: approvalQueue -> adminIDs
   if (!id) {
     try {
       const info = await api.getThreadInfo(group.threadID);
-
       if (info.approvalQueue && info.approvalQueue.length > 0) {
         id = String(info.approvalQueue[0].requesterID);
       } else if (info.adminIDs && info.adminIDs.length > 0) {
@@ -104,7 +124,6 @@ async function resolveAdder(api, group, adderCache) {
     }
   }
 
-  // নাম আনা (ফেইল করলেও আইডি/লিংক থাকবে)
   if (id && !name) {
     try {
       const u = await api.getUserInfo(id);
@@ -121,6 +140,108 @@ async function resolveAdder(api, group, adderCache) {
   };
 }
 
+// ⏱️ আপটাইম
+function formatUptime(sec) {
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const parts = [];
+  if (d) parts.push(`${d}d`);
+  if (h) parts.push(`${h}h`);
+  parts.push(`${m}m`);
+  return parts.join(" ");
+}
+
+// ===================================================
+// অনুমোদনের পর গ্রুপে নিকনেম (BOTNAME) + জয়েন মেসেজ
+// ===================================================
+async function welcomeGroup(api, groupID) {
+  const cfg = global.config || {};
+  const prefix = cfg.PREFIX || "/";
+  const botName = cfg.BOTNAME || "BOT";
+
+  const ownerUID = String((cfg.ADMINBOT || [])[0] || "").trim();
+  const msgLink = ownerUID ? `https://m.me/${ownerUID}` : "N/A";
+
+  let totalCmds = "N/A";
+  try {
+    if (global.client && global.client.commands) totalCmds = global.client.commands.size;
+  } catch (_) {}
+
+  const uptime = formatUptime(process.uptime());
+
+  // নিকনেম সেট (config.json এর BOTNAME)
+  if (cfg.BOTNAME) {
+    try {
+      await api.changeNickname(cfg.BOTNAME, groupID, api.getCurrentUserID());
+    } catch (e) {
+      console.log("[pending] nickname error:", groupID, e && e.message ? e.message : e);
+    }
+  }
+
+  await new Promise(r => setTimeout(r, 800));
+
+  await api.sendMessage(
+`╭─━━━━━━━━━━━━━━━━─╮
+   🌸 আসসালামু আলাইকুম 🌸
+╰─━━━━━━━━━━━━━━━━─╯
+
+🥰 চলে এসেছি তোমাদের মাঝে!
+এখন থেকে তোমাদের সাথে আড্ডা দিব,
+মজা করব আর সব কাজে পাশে থাকব ✨
+
+┏━━━━━━━━━━━━━━━━━━┓
+┃ 🏷️ Name : ${botName}
+┃ ⚙️ Prefix : ${prefix}
+┃ 🔰 Mode : Active
+┃ 📦 Commands : ${totalCmds}
+┃ ⏱️ Uptime : ${uptime}
+┃ 🟢 Status : Online
+┗━━━━━━━━━━━━━━━━━━┛
+
+📖 Menu  ➜ ${prefix}help
+ℹ️ Info  ➜ ${prefix}info
+👑 Admin ➜ ${prefix}admin
+
+💬 Message Admin: ${msgLink}
+
+💖 আমাকে অ্যাড করার জন্য ধন্যবাদ!`,
+    groupID
+  );
+}
+
+// ===================================================
+// পেন্ডিং লিস্ট: ফেসবুক PENDING/OTHER + approval.js পেন্ডিং
+// ===================================================
+async function buildPendingList(api) {
+  const [spam, pending] = await Promise.all([
+    api.getThreadList(100, null, ["OTHER"]).catch(() => []),
+    api.getThreadList(100, null, ["PENDING"]).catch(() => [])
+  ]);
+
+  const map = new Map();
+
+  for (const g of [...(spam || []), ...(pending || [])]) {
+    if (g && g.isGroup && g.isSubscribed && !approval.isApproved(g.threadID)) {
+      map.set(String(g.threadID), g);
+    }
+  }
+
+  for (const tid of approval.pendingList()) {
+    if (!map.has(String(tid)) && !approval.isApproved(tid)) {
+      let g = { threadID: String(tid), name: null, participantIDs: null };
+      try {
+        const info = await api.getThreadInfo(tid);
+        g.name = info.threadName || info.name || null;
+        g.participantIDs = info.participantIDs || [];
+      } catch (_) {}
+      map.set(String(tid), g);
+    }
+  }
+
+  return [...map.values()];
+}
+
 // ===================================================
 // handleReply : approve / reject
 // ===================================================
@@ -132,6 +253,7 @@ module.exports.handleReply = async function ({ api, event, handleReply, getText 
   }
 
   const { body, threadID, messageID } = event;
+  const botID = api.getCurrentUserID();
   let count = 0;
 
   // ❌ REJECT
@@ -144,94 +266,69 @@ module.exports.handleReply = async function ({ api, event, handleReply, getText 
         return api.sendMessage(getText("invaildNumber", num), threadID, messageID);
       }
 
+      const gid = handleReply.pending[index - 1].threadID;
       try {
-        await api.removeUserFromGroup(api.getCurrentUserID(), handleReply.pending[index - 1].threadID);
+        await leaveThread(api, botID, gid);
+        approval.remove(gid);
         count++;
-      } catch (e) {}
+      } catch (e) {
+        console.log("[pending] reject error:", gid, e && e.message ? e.message : e);
+      }
     }
 
     return api.sendMessage(getText("cancelSuccess", count), threadID, messageID);
   }
 
   // ✅ APPROVE
-  else {
-    const indexes = body.match(/\d+/g) || [];
+  const indexes = body.match(/\d+/g) || [];
 
-    for (const num of indexes) {
-      const index = parseInt(num);
-      if (isNaN(index) || index <= 0 || index > handleReply.pending.length) {
-        return api.sendMessage(getText("invaildNumber", num), threadID, messageID);
-      }
-
-      const groupID = handleReply.pending[index - 1].threadID;
-      count++;
-
-      try {
-        // 🔥 NOTI BOX 1
-        await api.sendMessage(
-          `চ্ঁলে্ঁ এ্ঁসে্ঁছি্ঁ ⎯꯭𓆩꯭𝆺𝅥😻⃞𝐑⃞𝐈⃞𝐘⃞𝐀⃞༢࿐ এঁখঁনঁ তোঁমাঁদেঁরঁ সাঁথেঁ আঁড্ডাঁ দিঁবঁ..!😘`,
-          groupID
-        );
-
-        // 🔥 বটের নিকনেম সেট
-        try {
-          await api.changeNickname(
-            "⎯꯭𓆩꯭𝆺𝅥😻⃞𝐑⃞𝐈⃞𝐘⃞𝐀⃞༢࿐",
-            groupID,
-            api.getCurrentUserID()
-          );
-        } catch (e) {}
-
-        await new Promise(r => setTimeout(r, 800));
-
-        // 🔥 NOTI BOX 2
-        await api.sendMessage(
-          `╭•┄┅═══❁🌺❁═══┅┄•╮
-আ্ঁস্ঁসা্ঁলা্ঁমু্ঁ💚আ্ঁলা্ঁই্ঁকু্ঁম্ঁ
-╰•┄┅═══❁🌺❁═══┅┄•╯
-
-𝐓𝐡𝐚𝐧𝐤 𝐲𝐨𝐮 𝐬𝐨 𝐦𝐮𝐜𝐡 𝐟𝐨𝐫 𝐚𝐝𝐝𝐢𝐧𝐠 𝐦𝐞 𝐭𝐨 𝐲𝐨𝐮𝐫 𝐠𝐫𝐨𝐮𝐩! 🖤🤗
-𝐈 𝐰𝐢𝐥𝐥 𝐚𝐥𝐰𝐚𝐲𝐬 𝐬𝐞𝐫𝐯𝐞 𝐲𝐨𝐮 𝐢𝐧𝐬𝐡𝐚𝐀𝐥𝐥𝐚𝐡 🌺❤️
-
-𝐂𝐨𝐦𝐦𝐚𝐧𝐝 𝐋𝐢𝐬𝐭:
-${global.config.PREFIX}help
-${global.config.PREFIX}info
-${global.config.PREFIX}admin
-
-➤ Messenger: m.me/mrjuwel444
-➤ WhatsApp: +8801943488192
-
-❖⋆══════════════⋆❖
-𝐎𝐰𝐧𝐞𝐫➢乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐`,
-          groupID
-        );
-      } catch (e) {}
-
-      await new Promise(r => setTimeout(r, 1000));
+  for (const num of indexes) {
+    const index = parseInt(num);
+    if (isNaN(index) || index <= 0 || index > handleReply.pending.length) {
+      return api.sendMessage(getText("invaildNumber", num), threadID, messageID);
     }
 
-    return api.sendMessage(getText("approveSuccess", count), threadID, messageID);
+    const groupID = handleReply.pending[index - 1].threadID;
+
+    // আগে অনুমোদন, তারপর মেসেজ
+    approval.approve(groupID, event.senderID);
+    count++;
+
+    try {
+      await welcomeGroup(api, groupID);
+    } catch (e) {
+      console.log("[pending] welcome error:", groupID, e && e.message ? e.message : e);
+    }
+
+    await new Promise(r => setTimeout(r, 1000));
   }
+
+  return api.sendMessage(getText("approveSuccess", count), threadID, messageID);
 };
 
 // ===================================================
 // run : pending লিস্ট দেখানো
 // ===================================================
-module.exports.run = async function ({ api, event, getText }) {
+module.exports.run = async function ({ api, event, args, getText }) {
   const { threadID, messageID, senderID } = event;
 
   if (!isAdmin(senderID)) {
     return api.sendMessage(getText("noPermission"), threadID, messageID);
   }
 
-  try {
-    const [spam, pending] = await Promise.all([
-      api.getThreadList(100, null, ["OTHER"]),
-      api.getThreadList(100, null, ["PENDING"])
-    ]);
+  // pending <গ্রুপ আইডি> → সরাসরি অ্যাপ্রুভ
+  if (args && /^\d{8,}$/.test(args[0] || "")) {
+    approval.approve(args[0], senderID);
+    try {
+      await welcomeGroup(api, args[0]);
+    } catch (e) {
+      console.log("[pending] welcome error:", args[0], e && e.message ? e.message : e);
+    }
+    return api.sendMessage(getText("approveSuccess", 1), threadID, messageID);
+  }
 
-    const list = [...(spam || []), ...(pending || [])]
-      .filter(group => group.isSubscribed && group.isGroup);
+  try {
+    const list = await buildPendingList(api);
 
     if (list.length === 0) {
       return api.sendMessage(getText("returnListClean"), threadID, messageID);
@@ -239,12 +336,11 @@ module.exports.run = async function ({ api, event, getText }) {
 
     const adderCache = loadAdderCache();
 
-    // 🔥 GROUP INFO + ADDER + PROFILE LINK
     const msgArr = await Promise.all(list.map(async (group, index) => {
-      const members = group.participantIDs?.length || 0;
+      const members = group.participantIDs ? group.participantIDs.length : 0;
       const adder = await resolveAdder(api, group, adderCache);
 
-      return `┃ ${index + 1}. ${group.name || 'Unnamed'}
+      return `┃ ${index + 1}. ${group.name || "Unnamed"}
 ┃ 🆔 ${group.threadID}
 ┃ 👥 ${members} members
 ┃ 👤 ${adder.name}
@@ -268,9 +364,8 @@ module.exports.run = async function ({ api, event, getText }) {
       },
       messageID
     );
-
   } catch (e) {
-    console.error(e);
+    console.error("[pending] list error:", e);
     return api.sendMessage(getText("cantGetPendingList"), threadID, messageID);
   }
 };
