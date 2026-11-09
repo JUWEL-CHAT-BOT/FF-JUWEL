@@ -15,7 +15,7 @@
 
 <!-- ═══════════════ HEADER WAVE ═══════════════ -->
 <p align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=12,14,18,24&height=240&section=header&text=JUWEL%20CHAT%20BOT&fontSize=62&fontColor=ffffff&animation=fadeIn&fontAlignY=36&desc=Ultra%20Premium%20Messenger%20Automation%20System&descSize=20&descAlignY=58" width="100%"/>
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=12,14,18,24&height=240&section=header&text=RIYA%20CHAT%20BOT&fontSize=62&fontColor=ffffff&animation=fadeIn&fontAlignY=36&desc=Ultra%20Premium%20Messenger%20Automation%20System&descSize=20&descAlignY=58" width="100%"/>
 </p>
 
 <!-- ═══════════════ LOGO: Mirai + Goat + JUWEL / MR JUWEL BOT ═══════════════ -->
@@ -23,12 +23,12 @@
   <img src="assets/juwel-logo.svg" alt="Mirai + Goat — JUWEL — MR JUWEL BOT" width="640"/>
 </p>
 
-<h1 align="center">𝙼𝚁 𝙹𝚄𝚆𝙴𝙻</h1>
+<h1 align="center">𝚁𝙸𝚈𝙰</h1>
 <h3 align="center">⚡ Ultra Premium Messenger Automation System</h3>
 
 <!-- HERO ANIMATION -->
 <p align="center">
-  <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&weight=700&size=26&duration=2500&pause=900&color=00E5FF&center=true&vCenter=true&width=820&lines=%F0%9F%A4%96+Welcome+To+JUWEL+CHAT+BOT;%F0%9F%90%90+Mirai+%2B+GoatBot+%E2%80%94+Both+Work+Together;%E2%9A%A1+270%2B+Commands+%7C+No+Prefix+%7C+Inbox+Ready;%F0%9F%9B%A1%EF%B8%8F+Fast+%7C+Smart+%7C+Secure+%7C+Stable" />
+  <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&weight=700&size=26&duration=2500&pause=900&color=00E5FF&center=true&vCenter=true&width=820&lines=%F0%9F%A4%96+Welcome+To+RIYA+CHAT+BOT;%F0%9F%90%90+Mirai+%2B+GoatBot+%E2%80%94+Both+Work+Together;%E2%9A%A1+270%2B+Commands+%7C+No+Prefix+%7C+Inbox+Ready;%F0%9F%9B%A1%EF%B8%8F+Fast+%7C+Smart+%7C+Secure+%7C+Stable" />
 </p>
 
 <p align="center">
@@ -68,7 +68,7 @@
 
 <!-- ═══════════════ AUTO COOKIE + AUTO LOGIN ═══════════════ -->
 <p align="center">
-  <img src="assets/auto-cookie-banner.svg" alt="JUWEL CHAT BOT — Auto Cookie — Auto Facebook Login" width="85%"/>
+  <img src="assets/auto-cookie-banner.svg" alt="RIYA CHAT BOT — Auto Cookie — Auto Facebook Login" width="85%"/>
 </p>
 
 <h1 align="center">🍪 AUTO COOKIE &amp; AUTO LOGIN</h1>
@@ -130,7 +130,7 @@ Authenticator সিক্রেট কী দিলে 2FA কোডও নি�
 
 <!-- ═══════════════ RENDER AUTO KEEP-ALIVE ═══════════════ -->
 <p align="center">
-  <img src="assets/render-keepalive-banner.svg" alt="JUWEL CHAT BOT — Render Auto Keep-Alive — No UptimeRobot Needed" width="85%"/>
+  <img src="assets/render-keepalive-banner.svg" alt="RIYA CHAT BOT — Render Auto Keep-Alive — No UptimeRobot Needed" width="85%"/>
 </p>
 
 <h1 align="center">🌐 RENDER AUTO KEEP-ALIVE</h1>
@@ -181,13 +181,13 @@ Render নিজে যে লিংক দেয় (`RENDER_EXTERNAL_URL`) ব
 
 | ধাপ | কাজ |
 |:---|:---|
-| 1️⃣ | `juwelKeepAlive.js` ফাইলটা রিপোতে `Juwel.js`-এর পাশে থাকতে হবে |
+| 1️⃣ | `JuwelKeepalive.js` ফাইলটা রিপোতে `Juwel.js`-এর পাশে থাকতে হবে |
 | 2️⃣ | Render → আপনার সার্ভিস → **Settings** → **Build & Deploy** |
-| 3️⃣ | **Start Command** এ লিখুন: `node juwelKeepAlive.js` |
+| 3️⃣ | **Start Command** এ লিখুন: `node JuwelKeepalive.js` |
 | 4️⃣ | **Save Changes** → **Manual Deploy → Deploy latest commit** |
 | 5️⃣ | লগে `[KEEPALIVE] ... (200)` দেখলেই কাজ হচ্ছে ✅ — UptimeRobot-এ আর কিছু করতে হবে না |
 
-> 🍪 **Auto Cookie (Guardian) ও চালাতে চাইলে:** Start Command একই থাকবে (`node juwelKeepAlive.js`), শুধু Render-এর **Environment Variables**-এ `USE_GUARDIAN` = `1` দিন। তাহলে Keep-Alive + Auto Cookie দুটোই একসাথে চলবে।
+> 🍪 **Auto Cookie (Guardian) ও চালাতে চাইলে:** Start Command একই থাকবে (`node JuwelKeepalive.js`), শুধু Render-এর **Environment Variables**-এ `USE_GUARDIAN` = `1` দিন। তাহলে Keep-Alive + Auto Cookie দুটোই একসাথে চলবে।
 >
 > ℹ️ Render ফ্রি প্ল্যানে মাসে ৭৫০ ঘণ্টা পাওয়া যায় — একটা বট ২৪/৭ চালানোর জন্য এটাই যথেষ্ট, তাই একই অ্যাকাউন্টে একটার বেশি সার্ভিস চালাবেন না।
 
@@ -206,7 +206,7 @@ Render নিজে যে লিংক দেয় (`RENDER_EXTERNAL_URL`) ব
 
 <!-- ═══════════════ TELEGRAM START/STOP NOTICE ═══════════════ -->
 <p align="center">
-  <img src="assets/telegram-alert-banner.svg" alt="MR JUWEL — Bot Start / Stop Notice on Telegram" width="85%"/>
+  <img src="assets/telegram-alert-banner.svg" alt="RIYA — Bot Start / Stop Notice on Telegram" width="85%"/>
 </p>
 
 <h1 align="center">📡 TELEGRAM START / STOP NOTICE</h1>
@@ -218,7 +218,7 @@ Render নিজে যে লিংক দেয় (`RENDER_EXTERNAL_URL`) ব
   <img src="https://img.shields.io/badge/✈️_TELEGRAM-READY-26A5E4?style=for-the-badge"/>
 </p>
 
-<p align="center"><b>MR JUWEL</b> — বট চালু/বন্ধ হলে, ফেসবুক আইডি লক বা লগআউট হলে সাথে সাথে আপনার <b>Telegram</b>-এ নোটিশ যায়।</p>
+<p align="center"><b>RIYA</b> — বট চালু/বন্ধ হলে, ফেসবুক আইডি লক বা লগআউট হলে সাথে সাথে আপনার <b>Telegram</b>-এ নোটিশ যায়।</p>
 
 | নোটিশ | কখন যায় |
 |:---|:---|
@@ -240,6 +240,27 @@ Render নিজে যে লিংক দেয় (`RENDER_EXTERNAL_URL`) ব
 
 ---
 
+<h1 align="center">📞 ABOUT · CONTACT · ADMIN &amp; SUPPORT GROUP</h1>
+
+<p align="center">
+  কোনো সাহায্য লাগলে নিচের বাটনে চাপ দিন — সোজা অ্যাডমিনের আইডিতে চলে যাবেন।<br/>
+  বিশেষ প্রয়োজন ছাড়া অ্যাডমিনকে বিরক্ত করবেন না। ধন্যবাদ! 🙏
+</p>
+
+<p align="center">
+  <a href="https://wa.me/8801943488192?text=Assalamualaikum%20Admin%20Need%20Help%20Please"><img src="assets/whatsapp.svg" alt="WhatsApp" width="240"/></a>
+  <a href="https://t.me/mrjuwel2025"><img src="assets/telegram.svg" alt="Telegram" width="240"/></a>
+  <a href="https://fb.com/mrjuwel777"><img src="assets/facebook.svg" alt="Facebook" width="240"/></a>
+</p>
+<p align="center">
+  <a href="mailto:mrjuwel315@gmail.com"><img src="assets/gmail.svg" alt="Gmail" width="240"/></a>
+  <a href="https://www.youtube.com/@BdBotTame"><img src="assets/youtube.svg" alt="YouTube" width="240"/></a>
+  <a href="https://m.me/j/bUq30eov7FMa149R/?send_source=gc%3Acopy_invite_link_t"><img src="assets/messenger-group.svg" alt="Messenger Support Group" width="300"/></a>
+</p>
+
+---
+
+
 <h1 align="center">🚀 PROJECT STATUS</h1>
 
 <p align="center">
@@ -249,12 +270,12 @@ Render নিজে যে লিংক দেয় (`RENDER_EXTERNAL_URL`) ব
   <img src="https://img.shields.io/badge/UPTIME-24%2F7-00e676?style=for-the-badge"/>
   <img src="https://img.shields.io/badge/RENDER-KEEP--ALIVE-00ffa3?style=for-the-badge"/>
   <img src="https://img.shields.io/badge/LICENSE-MIT-ffd200?style=for-the-badge"/>
-  <img src="https://img.shields.io/badge/NODE.JS-%E2%89%A520-68a063?style=for-the-badge&logo=nodedotjs&logoColor=white"/>
+  <img src="https://img.shields.io/badge/NODE.JS-%E2%89%A522-68a063?style=for-the-badge&logo=nodedotjs&logoColor=white"/>
 </p>
 
 <table align="center">
 <tr>
-<td align="center"><h2>270+</h2><b>Commands</b></td>
+<td align="center"><h2>260+</h2><b>Commands</b></td>
 <td align="center"><h2>15+</h2><b>No-Prefix Triggers</b></td>
 <td align="center"><h2>10+</h2><b>Event Handlers</b></td>
 <td align="center"><h2>25+</h2><b>Banner / Frame Makers</b></td>
@@ -271,7 +292,7 @@ Render নিজে যে লিংক দেয় (`RENDER_EXTERNAL_URL`) ব
 </p>
 
 <h3 align="center">
-  <b>JUWEL CHAT BOT</b> একটি advanced Messenger automation system যা<br/>
+  <b>RIYA CHAT BOT</b> একটি advanced Messenger automation system যা<br/>
   group এবং inbox <b>smartভাবে control</b> করে। 🎯
 </h3>
 
@@ -620,43 +641,39 @@ Render-এ Self Keep-Alive — UptimeRobot ছাড়াই সারাক্
 </p>
 
 <details>
-<summary><b>❖ DEPLOY_WORKFLOWS ❖</b> — GitHub Actions</summary>
+<summary><b>❖ DEPLOY_WORKFLOWS ❖</b> — GitHub Actions (<code>.github/workflows/main.yml</code> · Node 22)</summary>
 
 ```yaml
-name: Juwel.js CI
+name: Run Bot
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"   # প্রতি ৬ ঘণ্টায় বট নিজে আবার চালু হবে
+
+concurrency:
+  group: run-bot
+  cancel-in-progress: true
 
 jobs:
-  build:
+  run:
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        node-version: [20.x]
-        # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
+    timeout-minutes: 350   # GitHub এক জবে সর্বোচ্চ ৬ ঘণ্টা দেয়
 
     steps:
-      # Step to check out the repository code
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      # Step to set up the specified Node.js version
-      - name: Use Node.js ${{ matrix.node-version }}
+      - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 22.x
 
-      # Step to install dependencies
       - name: Install dependencies
         run: npm install
 
-      # Syntax check (npm start বট চালু করে, যা কখনো শেষ হয় না — তাই CI-তে ব্যবহার করা হয়নি)
-      - name: Syntax check
-        run: node --check Juwel.js
+      - name: Start bot
+        run: npm start
 ```
 
 </details>
@@ -670,6 +687,8 @@ jobs:
 **Start Command** — বটের ফোল্ডারে গিয়ে:
 
 ```bash
+git clone https://github.com/GOAT-MIRAI-MIX/MR-JUWEL.git
+cd MR-JUWEL
 npm install
 node Juwel.js        # অথবা: npm start
 ```
@@ -677,10 +696,10 @@ node Juwel.js        # অথবা: npm start
 **Render-এ** (UptimeRobot ছাড়া সারাক্ষণ অনলাইন):
 
 ```bash
-node juwelKeepAlive.js
+node JuwelKeepalive.js
 ```
 
-> ⚠️ সবসময় `npm start` / `node Juwel.js` / `node juwelKeepAlive.js` — `node Main.js` নয়।
+> ⚠️ সবসময় `npm start` / `node Juwel.js` / `node JuwelKeepalive.js` — `node Main.js` নয়।
 > `appstate.json` এ কুকি বসান, `config.json` এ `ADMINBOT` / `DEVELOPER` এ আপনার UID দিন।
 
 ---
@@ -695,49 +714,41 @@ node juwelKeepAlive.js
 
 ---
 
-<h1 align="center">👨‍💻 ABOUT THE DEVELOPER</h1>
+<h1 align="center">👤 ABOUT ADMIN</h1>
 
 <p align="center">
-  <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&weight=700&size=22&duration=2500&pause=700&color=FF00CC&center=true&vCenter=true&width=640&lines=JUWEL+ISLAM;Nice+Name%3A+MR+JUWEL;Student+%7C+Rangpur%2C+Bangladesh" />
+  <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&weight=700&size=22&duration=2500&pause=700&color=FF00CC&center=true&vCenter=true&width=640&lines=JUWEL;Sigma+Boy+%F0%9F%98%8E;Attitude+King+%F0%9F%91%91" alt="Admin"/>
 </p>
 
-| | |
-|:---|:---|
-| 🧑 **Name** | `JUWEL ISLAM` |
-| ⭐ **Nice Name** | `MR JUWEL` |
-| 🎓 **Profession** | `STUDENT` |
-| 📍 **Location** | `RANGPUR, BANGLADESH` |
-
-### 📞 CONTACT INFORMATION
-- **WhatsApp:** [+8801943488192](https://wa.me/8801943488192)
-- **Facebook:** [Facebook ID](https://fb.com/mrjuwel520)
-- **Messenger:** [Message Me](https://m.me/61592716197470)
-
-### 🚀 DEVELOPMENT APPROACH
-- 💻 Copy-paste techniques with customizations
-- 🤝 Collaborative development with friends
-- 🤖 AI-powered using ChatGPT and other advanced tools
+```text
+╔════════════════════════════════════════════╗
+║      ✦  A D M I N   P R O F I L E  ✦       ║
+╠════════════════════════════════════════════╣
+║ ❖ NAME         ➤  Juwel                    ║
+║ ❖ BOT NAME     ➤  RIYA                     ║
+║ ❖ BIRTHDAY     ➤  24 April                 ║
+║ ❖ AGE          ➤  22 Years                 ║
+║ ❖ HEIGHT       ➤  5.5 ft                   ║
+║ ❖ ADDRESS      ➤  Rangpur City             ║
+║ ❖ WORK         ➤  Construction             ║
+║ ❖ RELATIONSHIP ➤  Single                   ║
+║ ❖ STYLE        ➤  Sigma Boy                ║
+║ ❖ ATTITUDE     ➤  King                     ║
+║ ❖ INTEREST     ➤  Free Fire Lover          ║
+║ ❖              ➤  Hacking Lover            ║
+╠════════════════════════════════════════════╣
+║          Stay Sigma  •  Stay King          ║
+╚════════════════════════════════════════════╝
+```
 
 ---
 
-<h1 align="center">❖ SUPPORT</h1>
-
 <p align="center">
-  If you need any help, you can contact the admin.<br/>
-  Please do not disturb the admin unless you have a special need. Thank you! 🙏
+  <img src="assets/thank-you.svg" alt="Thank You For Using My Fork" width="100%"/>
 </p>
 
-<p align="center">
-  <a href="https://wa.me/8801943488192?text=Assalamualaikum%20Admin%20MR%20JUWEL%20Need%20Help%20Please%20Brother%20🫶"><img alt="WhatsApp" src="https://img.shields.io/badge/WhatsApp-25D366?style=for-the-badge&logo=whatsapp&logoColor=white"></a>
-  <a href="https://m.me/61592716197470"><img alt="Messenger" src="https://img.shields.io/badge/Messenger-00B2FF?style=for-the-badge&logo=messenger&logoColor=white"></a>
-  <a href="https://fb.com/mrjuwel520"><img alt="Facebook" src="https://img.shields.io/badge/Facebook-1877F2?style=for-the-badge&logo=facebook&logoColor=white"></a>
-  <a href="https://t.me/+7RqN73zA6aBiY2U1"><img alt="Telegram" src="https://img.shields.io/badge/Telegram-26A5E4?style=for-the-badge&logo=telegram&logoColor=white"></a>
-  <a href="https://youtube.com/@scb-community"><img alt="YouTube" src="https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white"></a>
-</p>
+<h2 align="center">💖 আমার ফর্ক ব্যবহার করার জন্য অনেক ধন্যবাদ! 💖</h2>
 
----
-
-<h2 align="center">💖 Thank You For Choosing 𝗝𝘂𝘄𝗲𝗹 𝗖𝗵𝗮𝘁 𝗕𝗼𝘁!</h2>
 
 <p align="center">
   🗓️ <i>Release Date:</i> <code>07/11/2025 at 02:00</code><br/>
@@ -746,10 +757,6 @@ node juwelKeepAlive.js
 
 <p align="center">
   <a href="https://github.com/GOAT-MIRAI-MIX/MR-JUWEL"><img src="https://img.icons8.com/fluency/48/000000/github.png" alt="GitHub"></a>
-  <a href="https://wa.me/8801943488192"><img src="https://img.icons8.com/color/48/000000/whatsapp.png" alt="WhatsApp"></a>
-  <a href="https://facebook.com/61592716197470"><img src="https://img.icons8.com/fluency/48/000000/facebook.png" alt="Facebook"></a>
-  <a href="https://t.me/+7RqN73zA6aBiY2U1"><img src="https://img.icons8.com/color/48/000000/telegram-app.png" alt="Telegram"></a>
-  <a href="https://youtube.com/@scb-community"><img src="https://img.icons8.com/color/48/000000/youtube-play.png" alt="YouTube"></a>
 </p>
 
 <p align="center"><b>I hope you enjoy my fork! Thank you for supporting the cyber chat bot community! 🫶</b></p>

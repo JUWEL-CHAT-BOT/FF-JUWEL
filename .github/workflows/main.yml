@@ -1,0 +1,30 @@
+name: Run Bot
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"   # প্রতি ৬ ঘণ্টায় বট নিজে আবার চালু হবে
+
+concurrency:
+  group: run-bot
+  cancel-in-progress: true
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350   # GitHub এক জবে সর্বোচ্চ ৬ ঘণ্টা দেয়
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Start bot
+        run: npm start
