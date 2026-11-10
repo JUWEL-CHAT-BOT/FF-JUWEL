@@ -150,19 +150,89 @@ async function collectMedia(api, threadID, commandMessageID, anchorTs, count, fi
   return media;
 }
 
-// Catbox-এ URL থেকে সরাসরি আপলোড (কোনো API key লাগে না)
-async function uploadToCatbox(axios, url) {
-  const params = new URLSearchParams();
-  params.append("reqtype", "urlupload");
-  params.append("url", url);
+// ফাইলটা আগে বটের মেমোরিতে নামিয়ে, তারপর Catbox-এ ফাইল হিসেবে আপলোড
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
 
-  const res = await axios.post(CATBOX_API, params.toString(), {
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    timeout: 60000,
-  });
+function guessExt(url, type) {
+  try {
+    const m = new URL(url).pathname.match(/\.([a-zA-Z0-9]{2,4})$/);
+    if (m) return m[1].toLowerCase();
+  } catch (e) {}
+  if (type === "audio") return "mp3";
+  if (type === "video") return "mp4";
+  if (type === "animated_image") return "gif";
+  return "jpg";
+}
 
-  const link = typeof res.data === "string" ? res.data.trim() : "";
-  return link.startsWith("http") ? link : null;
+function errInfo(e) {
+  const st = e.response && e.response.status ? `[${e.response.status}] ` : "";
+  let body = "";
+  if (e.response && e.response.data) {
+    try {
+      body = Buffer.isBuffer(e.response.data)
+        ? e.response.data.toString("utf-8")
+        : typeof e.response.data === "string"
+        ? e.response.data
+        : JSON.stringify(e.response.data);
+    } catch (x) {}
+  }
+  return `${st}${(body || e.message || "").toString().slice(0, 150)}`;
+}
+
+async function uploadToCatbox(axios, url, type) {
+  const FormData = require("form-data");
+
+  // ধাপ ১: Facebook থেকে ফাইল নামাও
+  let buf;
+  try {
+    const file = await axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: 60000,
+      headers: { "User-Agent": UA },
+    });
+    buf = Buffer.from(file.data);
+  } catch (e) {
+    throw new Error("ডাউনলোড ধাপ: " + errInfo(e));
+  }
+
+  // ধাপ ২: Catbox-এ ফাইল আপলোড
+  let err1 = "";
+  try {
+    const form = new FormData();
+    form.append("reqtype", "fileupload");
+    form.append("userhash", "");
+    form.append("fileToUpload", buf, {
+      filename: `file_${Date.now()}.${guessExt(url, type)}`,
+    });
+    const res = await axios.post(CATBOX_API, form, {
+      headers: { ...form.getHeaders(), "User-Agent": UA },
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+      timeout: 120000,
+    });
+    const link = String(res.data || "").trim();
+    if (link.startsWith("http")) return link;
+    err1 = "উত্তর: " + link.slice(0, 150);
+  } catch (e) {
+    err1 = errInfo(e);
+  }
+
+  // ধাপ ৩ (ব্যাকআপ): Catbox-কে সরাসরি URL দিয়ে
+  try {
+    const params = new URLSearchParams();
+    params.append("reqtype", "urlupload");
+    params.append("userhash", "");
+    params.append("url", url);
+    const res = await axios.post(CATBOX_API, params.toString(), {
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": UA },
+      timeout: 60000,
+    });
+    const link = String(res.data || "").trim();
+    if (link.startsWith("http")) return link;
+    throw new Error("উত্তর: " + link.slice(0, 150));
+  } catch (e) {
+    throw new Error(`Catbox আপলোড ধাপ: ফাইল-মোড(${err1}) | URL-মোড(${errInfo(e)})`);
+  }
 }
 
 module.exports.run = async ({ api, event, args }) => {
@@ -226,19 +296,21 @@ module.exports.run = async ({ api, event, args }) => {
 
   // ===== Catbox-এ আপলোড =====
   const uploadedLinks = [];
+  let lastError = "";
   for (const m of finalMedia) {
     try {
-      const link = await uploadToCatbox(axios, m.url);
+      const link = await uploadToCatbox(axios, m.url, m.type);
       if (link) uploadedLinks.push(`"${link}"`);
     } catch (e) {
-      console.log("[catboxall] Upload error:", e.message);
+      lastError = e.message || String(e);
+      console.log("[catboxall] Upload error:", lastError);
       // ফেইল হলে স্কিপ
     }
   }
 
   if (uploadedLinks.length === 0) {
     return api.sendMessage(
-      "❌ কোনো মিডিয়া আপলোড করা যায়নি!",
+      `❌ কোনো মিডিয়া আপলোড করা যায়নি!\n🔎 কারণ: ${lastError || "অজানা"}`,
       threadID,
       messageID
     );
