@@ -6,7 +6,7 @@ const { execFile } = require("child_process");
 module.exports = {
   config: {
     name: "autodl",
-    version: "4.1.0",
+    version: "4.3.0",
     hasPermssion: 0,
     credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
     description: "Auto Video/MP3 Downloader (multi-link)",
@@ -25,6 +25,7 @@ module.exports = {
     const COOLDOWN_TIME = 5 * 60 * 1000;
     const MAX_LINKS = 3;                 // এক মেসেজে সর্বোচ্চ কয়টা লিংক
     const MAX_SIZE_MB = 25;              // Messenger লিমিট
+    const DEBUG = true;                  // true থাকলে কনসোলে API-র কাঁচা ডাটা দেখাবে (ঠিক হলে false করো)
 
     //━━━━━━━━━━ HELPERS ━━━━━━━━━━//
     const react = (emoji) => api.setMessageReaction(emoji, messageID, () => {}, true);
@@ -32,6 +33,8 @@ module.exports = {
       new Promise((resolve) =>
         api.sendMessage(msg, threadID, (err, info) => resolve(info), reply ? messageID : undefined)
       );
+
+    const log = (...a) => { if (DEBUG) console.log("[autodl]", ...a); };
 
     const detectPlatform = (url) => {
       if (/facebook\.com|fb\.watch|fb\.me/.test(url)) return "Facebook";
@@ -63,7 +66,7 @@ module.exports = {
 
     // যেকোনো নেস্টেড জায়গা থেকে key খুঁজে বের করে
     const deepPick = (obj, keys, depth = 0) => {
-      if (!obj || typeof obj !== "object" || depth > 5) return null;
+      if (!obj || typeof obj !== "object" || depth > 6) return null;
       const lower = keys.map((k) => k.toLowerCase());
       for (const k of Object.keys(obj)) {
         if (lower.includes(k.toLowerCase())) {
@@ -81,10 +84,22 @@ module.exports = {
     };
 
     const KEYS = {
-      views: ["views", "view", "view_count", "viewCount", "play_count", "playCount", "plays", "video_view_count"],
-      likes: ["likes", "like", "like_count", "likeCount", "digg_count", "diggCount", "favorite_count"],
-      comments: ["comments", "comment", "comment_count", "commentCount", "reply_count"],
-      shares: ["shares", "share", "share_count", "shareCount", "forward_count"]
+      views: [
+        "views", "view", "view_count", "viewCount", "views_count", "total_views",
+        "play_count", "playCount", "plays", "video_view_count"
+      ],
+      likes: [
+        "likes", "like", "like_count", "likeCount", "likes_count", "digg_count", "diggCount",
+        "favorite_count", "reaction_count", "reactions", "total_reactions"
+      ],
+      comments: [
+        "comments", "comment", "comment_count", "commentCount", "comments_count",
+        "total_comments", "reply_count"
+      ],
+      shares: [
+        "shares", "share", "share_count", "shareCount", "shares_count",
+        "total_shares", "forward_count"
+      ]
     };
 
     const extractStats = (data) => ({
@@ -106,6 +121,115 @@ module.exports = {
 
     const statsComplete = (s) =>
       STAT_KEYS.every((k) => s[k] !== null && s[k] !== undefined);
+
+    const hasAnyStat = (s) =>
+      !!s && STAT_KEYS.some((k) => s[k] !== null && s[k] !== undefined);
+
+    //━━━━━━━━━━ FACEBOOK STATS ━━━━━━━━━━//
+    const decodeHtml = (s) =>
+      String(s || "")
+        .replace(/&amp;/g, "&")
+        .replace(/&quot;/g, '"')
+        .replace(/&#039;|&#x27;/g, "'")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">");
+
+    // og:description / title থেকে "12K views, 345 reactions" ধরনের লেখা পার্স
+    const parseFbMeta = (html) => {
+      const text = [];
+      const re = /<meta[^>]+(?:property|name)=["'](?:og:description|og:title|twitter:description|description)["'][^>]*content=["']([^"']*)["']/gi;
+      const re2 = /<meta[^>]+content=["']([^"']*)["'][^>]*(?:property|name)=["'](?:og:description|og:title|twitter:description|description)["']/gi;
+      let m;
+      while ((m = re.exec(html))) text.push(decodeHtml(m[1]));
+      while ((m = re2.exec(html))) text.push(decodeHtml(m[1]));
+      const t = text.join(" | ");
+      const grab = (rx) => {
+        const x = t.match(rx);
+        return x ? parseNum(x[1]) : null;
+      };
+      return {
+        views: grab(/([\d.,]+\s?[KMB]?)\s*(?:views|plays)/i),
+        likes: grab(/([\d.,]+\s?[KMB]?)\s*(?:reactions|likes)/i),
+        comments: grab(/([\d.,]+\s?[KMB]?)\s*comments/i),
+        shares: grab(/([\d.,]+\s?[KMB]?)\s*shares/i)
+      };
+    };
+
+    // পেজের ভেতরের JSON থেকে
+    const parseFbJson = (html) => {
+      const pick = (...res) => {
+        for (const re of res) {
+          const m = String(html).match(re);
+          if (m) {
+            const n = parseNum(m[1]);
+            if (n !== null) return n;
+          }
+        }
+        return null;
+      };
+      return {
+        views: pick(/"play_count"\s*:\s*(\d+)/, /"video_view_count"\s*:\s*(\d+)/, /"view_count"\s*:\s*(\d+)/),
+        likes: pick(
+          /"reaction_count"\s*:\s*\{\s*"count"\s*:\s*(\d+)/,
+          /"i18n_reaction_count"\s*:\s*"([\d.,KMB]+)"/,
+          /"like_count"\s*:\s*(\d+)/
+        ),
+        comments: pick(
+          /"comment_count"\s*:\s*\{\s*"total_count"\s*:\s*(\d+)/,
+          /"comments"\s*:\s*\{\s*"total_count"\s*:\s*(\d+)/,
+          /"comment_count"\s*:\s*(\d+)/
+        ),
+        shares: pick(
+          /"share_count"\s*:\s*\{\s*"count"\s*:\s*(\d+)/,
+          /"i18n_share_count"\s*:\s*"([\d.,KMB]+)"/,
+          /"share_count"\s*:\s*(\d+)/
+        )
+      };
+    };
+
+    const fetchFbStats = async (link) => {
+      let stats = { views: null, likes: null, comments: null, shares: null };
+
+      // ১) তৃতীয় পক্ষের API
+      const sources = [
+        `https://api.siputzx.my.id/api/d/fbdl?url=${encodeURIComponent(link)}`,
+        `https://api.agatz.xyz/api/facebook?url=${encodeURIComponent(link)}`
+      ];
+      for (const u of sources) {
+        if (statsComplete(stats)) return stats;
+        try {
+          const { data } = await axios.get(u, { timeout: 12000 });
+          log("fb api raw:", u, JSON.stringify(data).slice(0, 400));
+          stats = mergeStats(stats, extractStats(data));
+        } catch (e) {
+          log("fb stats api failed:", e.message);
+        }
+      }
+
+      // ২) Facebook পেজ থেকে সরাসরি (meta + JSON)
+      const agents = [
+        "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      ];
+      for (const ua of agents) {
+        if (statsComplete(stats)) break;
+        try {
+          const { data: html } = await axios.get(link, {
+            timeout: 12000,
+            maxRedirects: 5,
+            headers: { "User-Agent": ua, "Accept-Language": "en-US,en;q=0.9" }
+          });
+          const h = String(html);
+          stats = mergeStats(stats, parseFbMeta(h));
+          stats = mergeStats(stats, parseFbJson(h));
+          log("fb html stats:", JSON.stringify(stats));
+        } catch (e) {
+          log("fb html failed:", e.message);
+        }
+      }
+
+      return hasAnyStat(stats) ? stats : null;
+    };
 
     //━━━━━━━━━━ FETCH INFO ━━━━━━━━━━//
     const fetchInfo = async (link, platform) => {
@@ -143,7 +267,7 @@ module.exports = {
             }
           }
         } catch (err) {
-          console.log("[autodl] tikwm failed:", err.message);
+          log("tikwm failed:", err.message);
         }
       }
 
@@ -153,6 +277,7 @@ module.exports = {
         try {
           const { data } = await axios.get(apiUrl, { timeout: 15000 });
           if (!data) continue;
+          log("api raw:", apiUrl.split("?")[0], JSON.stringify(data).slice(0, 400));
           const d = data.data || {};
 
           stats = mergeStats(stats, extractStats(data));
@@ -174,8 +299,14 @@ module.exports = {
             }
           }
         } catch (err) {
-          console.log("[autodl] API failed:", err.message);
+          log("API failed:", err.message);
         }
+      }
+
+      // Facebook-এর স্ট্যাটস না পেলে আলাদা সোর্স থেকে চেষ্টা
+      if (result && platform === "Facebook" && !statsComplete(stats)) {
+        const fb = await fetchFbStats(link);
+        if (fb) stats = mergeStats(stats, fb);
       }
 
       if (!result) return null;
@@ -250,11 +381,11 @@ module.exports = {
         ];
         if (stats) {
           lines.push(`┣━━━━━━━━━━━━━━━━━┫`);
-          const show = (v) => (has(v) ? fmt(v) : "N/A");
-          lines.push(`┃ 👁️ Views  ➜  ${show(stats.views)}`);
-          lines.push(`┃ ❤️ Likes  ➜  ${show(stats.likes)}`);
-          lines.push(`┃ 💬 Comments  ➜  ${show(stats.comments)}`);
-          lines.push(`┃ 🔁 Shares  ➜  ${show(stats.shares)}`);
+          // যেটা পাওয়া গেছে শুধু সেটাই দেখাবে, বাকিগুলো লুকানো
+          if (has(stats.views)) lines.push(`┃ 👁️ Views  ➜  ${fmt(stats.views)}`);
+          if (has(stats.likes)) lines.push(`┃ ❤️ Likes  ➜  ${fmt(stats.likes)}`);
+          if (has(stats.comments)) lines.push(`┃ 💬 Comments  ➜  ${fmt(stats.comments)}`);
+          if (has(stats.shares)) lines.push(`┃ 🔁 Shares  ➜  ${fmt(stats.shares)}`);
         }
         lines.push(`┣━━━━━━━━━━━━━━━━━┫`);
         lines.push(`┃ ⚡ Speed  ➜  ${time} sec`);
@@ -401,7 +532,8 @@ module.exports = {
             time,
             size: (size / 1024 / 1024).toFixed(2) + " MB",
             audio: isAudio,
-            stats: info.stats,
+            // কোনো স্ট্যাটই না পেলে পুরো স্ট্যাটস ব্লক লুকানো হবে
+            stats: hasAnyStat(info.stats) ? info.stats : null,
             index: i + 1,
             total: links.length
           }),
