@@ -1,4 +1,4 @@
-const fs = require("fs");                 // ✅ built-in, install লাগে না
+const fs = require("fs");
 const path = require("path");
 
 // ✅ approval মডিউল সেফ লোড
@@ -11,17 +11,32 @@ try {
 
 const ADDER_CACHE_FILE = path.join(__dirname, "adderCache.json");
 
-/* ========== Safe wrappers for approval API ========== */
-function _isApproved(tid) {
-  try { return approval && typeof approval.isApproved === "function" ? approval.isApproved(tid) : false; } catch { return false; }
+/* ========== callback + promise দুই স্টাইলের API-ই সাপোর্ট করে ========== */
+function callApi(api, method, ...args) {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const cb = (err, data) => {
+      if (done) return;
+      done = true;
+      err ? reject(err) : resolve(data);
+    };
+    try {
+      if (typeof api[method] !== "function") return cb(new Error(`api.${method} is not a function`));
+      const r = api[method](...args, cb);
+      if (r && typeof r.then === "function") r.then(d => cb(null, d), e => cb(e || new Error("unknown error")));
+    } catch (e) { cb(e); }
+  });
 }
 
-/* 🔥 UPDATED: config UID + approval module admin — দুটোই চেক */
+/* ========== Safe wrappers for approval API ========== */
+function _isApproved(tid) {
+  try { return approval && typeof approval.isApproved === "function" ? !!approval.isApproved(tid) : false; } catch { return false; }
+}
+
 function _isAdmin(uid) {
   const uidStr = String(uid || "").trim();
   if (!uidStr) return false;
 
-  // 1) config.json এর ADMINBOT / SUPERADMIN / ADMIN থেকে চেক
   try {
     const cfg = global.config || {};
     const adminList = [
@@ -34,7 +49,6 @@ function _isAdmin(uid) {
     console.log("[pending] config admin check err:", e.message);
   }
 
-  // 2) approval module এর admin চেক (backup)
   try {
     if (approval && typeof approval.isAdmin === "function") {
       return !!approval.isAdmin(uid);
@@ -57,16 +71,19 @@ function _pendingList() {
   try {
     if (!approval || typeof approval.pendingList !== "function") return [];
     const r = approval.pendingList();
-    if (Array.isArray(r)) return r;
-    if (r && typeof r === "object") return Object.keys(r);  // ✅ object হলে keys
-    return [];
+    let arr = [];
+    if (Array.isArray(r)) arr = r;
+    else if (r && typeof r === "object") arr = Object.keys(r);
+    return arr
+      .map(x => String(x && typeof x === "object" ? (x.threadID || x.tid || x.id) : x))
+      .filter(x => /^\d+$/.test(x));
   } catch { return []; }
 }
 
 /* ========== Module exports ========== */
 module.exports.config = {
   name: "pending",
-  version: "3.1.1",
+  version: "3.2.0",
   credits: "𝐌𝐑 𝐉𝐔𝐖𝐄𝐋",
   hasPermssion: 2,
   description: "Manage bot's pending group requests (config ADMINBOT users allowed)",
@@ -95,20 +112,8 @@ function loadAdderCache() {
   return {};
 }
 
-// ✅ callback + promise দুই স্টাইলেই লিভ
 function leaveThread(api, botID, tid) {
-  return new Promise((resolve, reject) => {
-    let done = false;
-    const cb = err => {
-      if (done) return;
-      done = true;
-      err ? reject(err) : resolve();
-    };
-    try {
-      const r = api.removeUserFromGroup(botID, tid, cb);
-      if (r && typeof r.then === "function") r.then(() => cb(), cb);
-    } catch (e) { cb(e); }
-  });
+  return callApi(api, "removeUserFromGroup", botID, tid);
 }
 
 async function resolveAdder(api, group, adderCache) {
@@ -129,20 +134,20 @@ async function resolveAdder(api, group, adderCache) {
 
   if (!id) {
     try {
-      const info = await api.getThreadInfo(group.threadID);
+      const info = await callApi(api, "getThreadInfo", group.threadID);
       if (info.approvalQueue?.length > 0) id = String(info.approvalQueue[0].requesterID);
       else if (info.adminIDs?.length > 0) id = String(info.adminIDs[0].id || info.adminIDs[0]);
     } catch (e) {
-      console.log("[pending] getThreadInfo failed:", group.threadID, e.message);
+      console.log("[pending] getThreadInfo failed:", group.threadID, e && e.message ? e.message : e);
     }
   }
 
   if (id && !name) {
     try {
-      const u = await api.getUserInfo(id);
+      const u = await callApi(api, "getUserInfo", id);
       name = u?.[id]?.name || null;
     } catch (e) {
-      console.log("[pending] getUserInfo failed:", id, e.message);
+      console.log("[pending] getUserInfo failed:", id, e && e.message ? e.message : e);
     }
   }
 
@@ -177,14 +182,14 @@ async function welcomeGroup(api, groupID) {
   const uptime = formatUptime(process.uptime());
 
   if (cfg.BOTNAME) {
-    try { await api.changeNickname(cfg.BOTNAME, groupID, api.getCurrentUserID()); }
-    catch (e) { console.log("[pending] nickname err:", groupID, e.message); }
+    try { await callApi(api, "changeNickname", cfg.BOTNAME, groupID, api.getCurrentUserID()); }
+    catch (e) { console.log("[pending] nickname err:", groupID, e && e.message ? e.message : e); }
   }
 
   await new Promise(r => setTimeout(r, 800));
 
   try {
-    await api.sendMessage(
+    await callApi(api, "sendMessage",
 `╭─━━━━━━━━━━━━━━━━─╮
    🌸 আসসালামু আলাইকুম 🌸
 ╰─━━━━━━━━━━━━━━━━─╯
@@ -212,37 +217,48 @@ async function welcomeGroup(api, groupID) {
       groupID
     );
   } catch (e) {
-    console.log("[pending] welcome msg err:", groupID, e.message);
+    console.log("[pending] welcome msg err:", groupID, e && e.message ? e.message : e);
   }
 }
 
-/* ========== Pending list builder ========== */
+/* ========== Pending list builder (FIXED) ========== */
 async function buildPendingList(api) {
   const map = new Map();
 
   for (const type of ["PENDING", "OTHER"]) {
     try {
-      const list = await api.getThreadList(100, null, [type]);
-      for (const g of (list || [])) {
-        if (g && g.isGroup && !_isApproved(g.threadID)) {
-          map.set(String(g.threadID), g);
-        }
+      const list = (await callApi(api, "getThreadList", 100, null, [type])) || [];
+      console.log(`[pending] ${type}: ${list.length} thread(s) found`);
+
+      for (const g of list) {
+        if (!g || !g.threadID) continue;
+        const tid = String(g.threadID);
+
+        // isGroup ঠিকমতো না এলে participant সংখ্যা দিয়ে চেক
+        const isGroup =
+          g.isGroup === true ||
+          (Array.isArray(g.participantIDs) && g.participantIDs.length > 2);
+
+        const approved = _isApproved(tid);
+        console.log(`[pending] ${tid} isGroup=${g.isGroup} approved=${approved}`);
+
+        if (isGroup && !approved) map.set(tid, g);
       }
     } catch (e) {
-      console.log(`[pending] getThreadList ${type} err:`, e.message);
+      console.log(`[pending] getThreadList ${type} err:`, e && e.message ? e.message : e);
     }
   }
 
+  // approval মডিউলের নিজস্ব pending লিস্ট থেকেও যোগ করো
   for (const tid of _pendingList()) {
-    const key = String(tid);
-    if (!map.has(key) && !_isApproved(key)) {
-      const g = { threadID: key, name: null, participantIDs: null };
+    if (!map.has(tid) && !_isApproved(tid)) {
+      const g = { threadID: tid, name: null, participantIDs: null };
       try {
-        const info = await api.getThreadInfo(key);
+        const info = await callApi(api, "getThreadInfo", tid);
         g.name = info.threadName || info.name || null;
         g.participantIDs = info.participantIDs || [];
       } catch {}
-      map.set(key, g);
+      map.set(tid, g);
     }
   }
 
@@ -269,7 +285,7 @@ module.exports.handleReply = async function ({ api, event, handleReply, getText 
     return api.sendMessage("❌ No valid number found.", threadID, messageID);
   }
 
-  // ❌ REJECT branch
+  // ❌ REJECT
   if (lower.startsWith("c")) {
     let count = 0;
     for (const num of indexes) {
@@ -284,7 +300,7 @@ module.exports.handleReply = async function ({ api, event, handleReply, getText 
         _remove(gid);
         count++;
       } catch (e) {
-        console.log("[pending] reject err:", gid, e.message);
+        console.log("[pending] reject err:", gid, e && e.message ? e.message : e);
       }
     }
     return api.sendMessage(getText("cancelSuccess", count), threadID, messageID);
@@ -304,7 +320,7 @@ module.exports.handleReply = async function ({ api, event, handleReply, getText 
     count++;
 
     try { await welcomeGroup(api, gid); }
-    catch (e) { console.log("[pending] welcome err:", gid, e.message); }
+    catch (e) { console.log("[pending] welcome err:", gid, e && e.message ? e.message : e); }
 
     await new Promise(r => setTimeout(r, 1000));
   }
@@ -324,7 +340,7 @@ module.exports.run = async function ({ api, event, args, getText }) {
   if (args && /^\d{8,}$/.test(args[0] || "")) {
     _approve(args[0], senderID);
     try { await welcomeGroup(api, args[0]); }
-    catch (e) { console.log("[pending] welcome err:", args[0], e.message); }
+    catch (e) { console.log("[pending] welcome err:", args[0], e && e.message ? e.message : e); }
     return api.sendMessage(getText("approveSuccess", 1), threadID, messageID);
   }
 
@@ -354,7 +370,7 @@ module.exports.run = async function ({ api, event, args, getText }) {
       (error, info) => {
         if (!error && global.client?.handleReply && Array.isArray(global.client.handleReply)) {
           global.client.handleReply.push({
-            name: this.config.name,
+            name: module.exports.config.name,
             messageID: info.messageID,
             author: senderID,
             pending: list
