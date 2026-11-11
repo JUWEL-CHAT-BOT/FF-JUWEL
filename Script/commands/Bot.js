@@ -4,8 +4,11 @@
 // ══════════════════════════════════════════════
 module.exports.config = {
   name: "bot",
-  version: "3.2.0",
-  hasPermssion: 2,
+  version: "3.3.0",
+  // IMPORTANT: 0 রাখতে হবে। 2 দিলে ফ্রেমওয়ার্ক run-এর আগেই
+  // শুধু "bot" লিখলেও ACCESS DENIED পাঠিয়ে দেয়।
+  // অ্যাডমিন চেক নিচে run-এর ভেতরেই আছে।
+  hasPermssion: 0,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "Bot ON/OFF — only works with 'bot on' / 'bot off' / 'bot status'",
   commandCategory: "system",
@@ -21,15 +24,17 @@ try {
 }
 
 module.exports.run = ({ api, event, args }) => {
-  const sub = String((args && args[0]) || "").toLowerCase();
+  const sub = String((args && args[0]) || "").toLowerCase().trim();
 
-  // Only on / off / status work. Plain "bot" stays silent (baby command replies).
+  // শুধু "bot" বা "bot কিছু-একটা" হলে একদম চুপ — বেবি কোড রিপ্লাই দিবে।
   if (sub !== "on" && sub !== "off" && sub !== "status") return;
 
   if (!power) return api.sendMessage("❌ includes/power.js not found.", event.threadID, event.messageID);
   if (!power.creditOk()) return api.sendMessage("❌ Credit mismatch, system disabled.\n👑 Credit: 乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐", event.threadID, event.messageID);
-  if (!power.isAdmin(event.senderID))
-    return api.sendMessage(power.notice("⛔ Only bot admins can use this command."), event.threadID, event.messageID);
+
+  // শুধু on/off/status দিলেই অ্যাডমিন চেক হবে
+  // অ্যাডমিন না হলে একদম চুপ — কোনো রিপ্লাই নেই
+  if (!power.isAdmin(event.senderID)) return;
 
   if (sub === "status") return power.status(api, event);
   if (sub === "off") return power.isOn() ? power.turnOff(api, event, power.parseDuration(args.slice(1).join(" "))) : api.sendMessage(power.notice("💤 Bot is already OFF."), event.threadID, event.messageID);
