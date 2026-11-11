@@ -8,6 +8,7 @@
 //  • bot status → status card
 //  • plain "bot" (no command) is ignored here — the baby command replies
 //  • only ADMINBOT (config.json) can use these commands
+//  • non-admins using on/off/status get NO reply (silent)
 //  • OFF state is saved to a file, so it survives restarts/crashes
 // ══════════════════════════════════════════════
 const fs = require("fs");
@@ -371,11 +372,13 @@ function gate(api, event) {
       const t = norm(event.body);
       const cmd = parseCmd(t);
       const isCmd = !!cmd;
+
+      // Not a bot admin → completely silent. No reply, and the event is
+      // swallowed here so no other command/handler answers it either.
       if (isCmd && !isAdmin(event.senderID)) {
-        console.log("[POWER] Not an admin, ignored. senderID = " + event.senderID);
-        if (isOn()) rawSend(api, notice("⛔ Only bot admins can use this command."), event.threadID, event.messageID);
-        return !isOn();
+        return true;
       }
+
       if (isCmd && isAdmin(event.senderID)) {
         if (cmd.type === "status") { status(api, event); return true; }
         if (cmd.type === "off") { if (isOn()) turnOff(api, event, cmd.ms); return true; }
