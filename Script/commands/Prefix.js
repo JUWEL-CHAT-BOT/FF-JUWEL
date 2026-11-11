@@ -1,30 +1,30 @@
 const fs = require("fs-extra");
-const os = require("os");
 const path = require("path");
 
 module.exports.config = {
   name: "prefix",
-  version: "3.3.0",
+  version: "3.4.0",
   hasPermssion: 0,
   credits: "MR JUWEL",
-  description: "Show bot prefix, owner info, system stats & command list",
+  description: "Show bot prefix and basic stats",
   commandCategory: "Information",
   usages: "[help]",
   cooldowns: 5
 };
 
-// Put your own links here
-const OWNER_FB_LINK = "https://www.fb.com/mrjuwel333";
-const SUPPORT_LINK = "https://m.me/j/bUq30eov7FMa149R/?send_source=gc%3Acopy_invite_link_t";
-
-// Auto delete time for the info card (20 seconds)
-const DELETE_AFTER = 20000;
-
-// Anti-spam store (used by handleEvent only)
+const DELETE_AFTER = 20000; // 20 seconds
 const spamMap = new Map();
-const SPAM_COOLDOWN = 10000; // 10 seconds
+const SPAM_COOLDOWN = 10000;
 
-// Converts A-Z, a-z, 0-9 to the 𝗕𝗼𝗹𝗱 sans-serif font
+// Duplicate guard: one card per message
+const handled = new Set();
+function once(messageID) {
+  if (handled.has(messageID)) return false;
+  handled.add(messageID);
+  setTimeout(() => handled.delete(messageID), 30000);
+  return true;
+}
+
 function f(str) {
   return String(str).replace(/[A-Za-z0-9]/g, (ch) => {
     const c = ch.charCodeAt(0);
@@ -34,7 +34,6 @@ function f(str) {
   });
 }
 
-// Get prefix from config.json
 function getConfigPrefix() {
   try {
     const configPath = path.join(__dirname, "..", "..", "config.json");
@@ -64,72 +63,22 @@ function getUptime() {
   return `${d}d ${h}h ${m}m`;
 }
 
-function mb(bytes) {
-  return (bytes / 1024 / 1024).toFixed(0);
-}
+async function sendBigCard({ api, event, prefix }) {
+  const { threadID, messageID } = event;
 
-function getBotInfo() {
-  return {
-    botName: global.config.BOTNAME || "────〲─⃞🎀⁽𝐑𝆠፝֟𝐈𝐘𝆠፝֟𝐀₎⪨‌‌‌‌‌‌‌‌‌‌‌‎⤸⃞🎀𐙚࿐",
-    ownerName: global.config.OWNER_NAME || "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐"
-  };
-}
+  if (!once(messageID)) return; // already sent for this message
 
-async function getUserName(Users, senderID) {
-  try {
-    return (await Users.getNameUser(senderID)) || "Friend";
-  } catch (e) {
-    return "Friend";
-  }
-}
-
-// ─────────────────────────────────────────────
-// Sends the BIG info card (shared by trigger words and the command)
-// ─────────────────────────────────────────────
-async function sendBigCard({ api, event, Users, prefix }) {
-  const { threadID, messageID, senderID } = event;
-
-  const userName = await getUserName(Users, senderID);
-  const { botName, ownerName } = getBotInfo();
-
-  const totalUsers = global.data.allUserID?.length || 0;
   const totalThreads = global.data.allThreadID?.length || 0;
   const totalCmds = global.client?.commands?.size || 0;
-
-  // RAM / CPU
-  const totalRam = os.totalmem();
-  const usedRam = totalRam - os.freemem();
-  const botRam = process.memoryUsage().rss;
-  const cpus = os.cpus();
-  const cpuModel = cpus.length ? cpus[0].model.trim() : "Unknown";
-  const cpuCores = cpus.length;
-  const load = os.loadavg()[0].toFixed(2);
-
-  // Ping
-  const ping = event.timestamp ? Math.max(Date.now() - event.timestamp, 0) : 0;
 
   const msg =
 `╭─────────────⭓
 │  ✨ ${f("PREFIX")} ✨
 │  ➤ 『 ${prefix} 』
 ├─────────────⭓
-│  👋 ${f("Hello,")} ${f(userName)}!
-├─────────────⭓
-│  🤖 ${botName}
-│  👑 ${ownerName}
-│  ⏱️ ${f(getUptime())}
-│  👥 ${f(totalUsers)}  |  💬 ${f(totalThreads)}
+│  ⏱️ ${f("Uptime:")} ${f(getUptime())}
+│  💬 ${f("Groups:")} ${f(totalThreads)}
 │  📦 ${f("Total Commands:")} ${f(totalCmds)}
-├─────────────⭓
-│  📡 ${f("Ping:")} ${f(ping + "ms")}
-│  🧠 ${f("RAM:")} ${f(mb(usedRam))}/${f(mb(totalRam))} ${f("MB")}
-│  🤖 ${f("Bot RAM:")} ${f(mb(botRam))} ${f("MB")}
-│  ⚙️ ${f("CPU:")} ${f(cpuModel)}
-│  🔢 ${f("Cores:")} ${f(cpuCores)} | ${f("Load:")} ${f(load)}
-├─────────────⭓
-│  🔗 ${f("Owner:")} ${OWNER_FB_LINK}
-│  💬 ${f("Support:")} ${SUPPORT_LINK}
-│  📜 ${f("Command List:")} ${prefix}prefix help
 ╰─────────────⭓`;
 
   return api.sendMessage(
@@ -137,7 +86,6 @@ async function sendBigCard({ api, event, Users, prefix }) {
     threadID,
     (err, info) => {
       if (err || !info) return;
-      // Auto delete after 20 seconds
       setTimeout(() => {
         try { api.unsendMessage(info.messageID); } catch (e) {}
       }, DELETE_AFTER);
@@ -146,12 +94,15 @@ async function sendBigCard({ api, event, Users, prefix }) {
   );
 }
 
-// ─────────────────────────────────────────────
-// Trigger words (no prefix needed) → now show the BIG card
-// ─────────────────────────────────────────────
-module.exports.handleEvent = async ({ event, api, Users }) => {
+// Trigger words (no prefix needed)
+module.exports.handleEvent = async ({ event, api }) => {
   const { threadID, messageID, body, senderID } = event;
   if (!body) return;
+
+  const prefix = getPrefix(threadID);
+
+  // If message starts with the prefix, run() will handle it
+  if (prefix && body.trim().startsWith(prefix)) return;
 
   const now = Date.now();
   if (spamMap.has(senderID) && now - spamMap.get(senderID) < SPAM_COOLDOWN) return;
@@ -177,18 +128,15 @@ module.exports.handleEvent = async ({ event, api, Users }) => {
     messageID, () => {}, true
   );
 
-  const prefix = getPrefix(threadID);
   if (!prefix || String(prefix).trim() === "") {
     return api.sendMessage(f("Prefix cannot be blank"), threadID, messageID);
   }
 
-  return sendBigCard({ api, event, Users, prefix });
+  return sendBigCard({ api, event, prefix });
 };
 
-// ─────────────────────────────────────────────
-// Run with prefix: {prefix}prefix  or  {prefix}prefix help
-// ─────────────────────────────────────────────
-module.exports.run = async ({ event, api, args, Users }) => {
+// {prefix}prefix  or  {prefix}prefix help
+module.exports.run = async ({ event, api, args }) => {
   const { threadID, messageID } = event;
 
   const prefix = getPrefix(threadID);
@@ -196,7 +144,6 @@ module.exports.run = async ({ event, api, args, Users }) => {
     return api.sendMessage(f("Prefix cannot be blank"), threadID, messageID);
   }
 
-  // Command list
   if (args[0] && args[0].toLowerCase() === "help") {
     const cmds = global.client && global.client.commands
       ? Array.from(global.client.commands.keys()).sort()
@@ -216,5 +163,5 @@ ${list}
     );
   }
 
-  return sendBigCard({ api, event, Users, prefix });
+  return sendBigCard({ api, event, prefix });
 };
