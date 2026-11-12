@@ -13,22 +13,7 @@ const OWNER = "mix-goat-mirai";
 const REPO = "MR-JUWEL";
 const repoLink = `https://github.com/${OWNER}/${REPO}`;
 
-// সুরক্ষা: ক্রেডিট বা রিপো লিংক বদলালে কমান্ড কাজ করবে না
-const LOCK = {
- credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
- repo: "https://github.com/mix-goat-mirai/MR-JUWEL.git",
-};
-
-
 module.exports.run = async function({ api, event }) {
-
- if (module.exports.config.credits !== LOCK.credits || repoLink !== LOCK.repo) {
- return api.sendMessage(
- "⚠️ ক্রেডিট অথবা রিপো লিংক চেঞ্জ করা হয়েছে, তাই এই কমান্ড কাজ করছে না।",
- event.threadID,
- event.messageID
- );
- }
 
  const msg = `
 🔥 𝗚𝗢𝗔𝗧 𝗠𝗜𝗥𝗔𝗜 𝗠𝗜𝗫 🔥
