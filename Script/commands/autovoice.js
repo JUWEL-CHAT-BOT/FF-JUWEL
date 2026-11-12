@@ -31,7 +31,7 @@ const blockTriggers = [
   "juwel ahamed'z",
   "juwel ahmed'z",
   "juwel ahame dz",
-  "juwel ahamedz",
+  "juwel ahamed",
   "জুয়েল আহামেদ'জ",
   "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐"
 ];
