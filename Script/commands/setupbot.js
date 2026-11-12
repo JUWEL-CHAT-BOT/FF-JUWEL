@@ -9,7 +9,7 @@ module.exports.config = {
 };
 
 const videoLink = "https://youtu.be/kNHDYw8GoQg";
-const repoLink = "https://github.com/GOAT-MIRAI-MIX/MR-JUWEL";
+const repoLink = "https://github.com/mix-goat-mirai/MR-JUWEL.git";
 
 module.exports.run = async function ({ api, event }) {
 
