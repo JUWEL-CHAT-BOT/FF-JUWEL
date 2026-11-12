@@ -3,20 +3,10 @@ const fs = require("fs-extra");
 const path = require("path");
 
 const triggers = [
-  // ইংরেজি
-  "Juwel", "jewel", "juwel", "jewel boss", "mr juwel", "boss juwel",
-  "juyel", "Juyel", "juwl", "Jwel",
-  "juwel vai", "juwel vaiya", "jowel", "Jowel", "hi juwel",
-  "love you juwel",
-
-  // বাংলা - সব বানান
-  "জোয়েল", "জোহেল", "জুয়েল ভাই",
-  "জুয়েল ভাইয়া", "জুয়েল বস",
-  "জুয়েল কই", "জুয়েল কোথায়", "কই জুয়েল",
-  "জোয়েল", "জুয়েল",
-  "জুয়েল আসো", "জুয়েল শুনো", "জুয়েল ভালোবাসি",
-  "আই লাভ ইউ জুয়েল",
-  "মিস ইউ জুয়েল", "হ্যালো জুয়েল", "হাই জুয়েল"
+  // ✅ শুধু মেইন ট্রিগার
+  "জুয়েল",
+  "Juwel",
+  "juwel"
 ];
 
 const audioUrls = [
@@ -36,17 +26,18 @@ const audioUrls = [
   "https://files.catbox.moe/314f6q.mp3"
 ];
 
-// এই লেখাটা বললে ট্রিগার কাজ করবে না
+// এই লেখাগুলো বললে ট্রিগার কাজ করবে না
 const blockTriggers = [
   "juwel ahamed'z",
   "juwel ahmed'z",
   "juwel ahame dz",
   "juwel ahamedz",
-  "জুয়েল আহামেদ'জ"
+  "জুয়েল আহামেদ'জ",
+  "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐"
 ];
 
 const cooldown = new Map();
-const COOLDOWN_TIME = 5 * 60 * 60 * 1000; // ৫ ঘন্টা
+const COOLDOWN_TIME = 10 * 60 * 60 * 1000; // ১০ ঘন্টা
 
 // কনফিগ ফাইল থেকে বট অ্যাডমিন লোড করার ফাংশন
 function getBotAdmins() {
@@ -70,7 +61,7 @@ function getBotAdmins() {
 
 module.exports.config = {
   name: "autovoice",
-  version: "1.0.2",
+  version: "1.0.4",
   hasPermission: 0,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "Auto voice reply",
@@ -100,7 +91,7 @@ module.exports.handleEvent = async function ({ api, event }) {
     const botAdmins = getBotAdmins();
     if (botAdmins.includes(senderID)) return;
 
-    // ⏳ ৫ ঘন্টা কুলডাউন চেক
+    // ⏳ ১০ ঘন্টা কুলডাউন চেক
     const lastTime = cooldown.get(senderID) || 0;
     if (now - lastTime < COOLDOWN_TIME) return;
     cooldown.set(senderID, now);
