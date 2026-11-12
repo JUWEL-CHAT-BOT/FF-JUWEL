@@ -1,9 +1,9 @@
 module.exports.config = {
 	name: "kick",
-	version: "1.6.0",
+	version: "1.7.0",
 	hasPermssion: 1,
 	credits: "MR JUWEL",
-	description: "Ultra fast multi kick system",
+	description: "Ultra fast multi kick system (admins allowed)",
 	commandCategory: "System",
 	usages: "[tag/reply]",
 	cooldowns: 2,
@@ -12,14 +12,24 @@ module.exports.config = {
 module.exports.run = async function ({ api, event }) {
 	try {
 		const threadID = event.threadID;
-		const botID = api.getCurrentUserID();
+		const botID = String(api.getCurrentUserID());
 
 		// গ্রুপের তথ্য আনা
 		const info = await api.getThreadInfo(threadID);
-		const adminIDs = (info.adminIDs || []).map(a => String(a.id || a));
 
-		// বট এডমিন কিনা চেক
-		if (!adminIDs.includes(String(botID))) {
+		// adminIDs normalize
+		const adminIDs = (info.adminIDs || []).map(a => {
+			if (a && typeof a === 'object') {
+				return String(a.id || a.userID || a.uid || a);
+			}
+			return String(a);
+		});
+
+		// গ্রুপ ক্রিয়েটর (owner) — এদের কিক করা যাবে না
+		const ownerID = String(info.threadCreatorID || info.creatorID || "");
+
+		// বট নিজে এডমিন কিনা চেক
+		if (!adminIDs.includes(botID)) {
 			return api.sendMessage(
 				"❌ আমি এই গ্রুপের এডমিন না!\nআগে আমাকে এডমিন বানান, তারপর কিক করতে পারবো।",
 				threadID,
@@ -42,50 +52,72 @@ module.exports.run = async function ({ api, event }) {
 		if (targetIDs.length === 0)
 			return api.sendMessage("⚠️ Reply or tag someone!", threadID, event.messageID);
 
-		// বট নিজেকে বা অন্য এডমিনকে কিক করা আটকানো
+		// শুধু বট নিজে এবং গ্রুপ ক্রিয়েটরকে বাদ দেওয়া (এডমিনদের এখন কিক করা যাবে)
 		const skipped = [];
 		const validIDs = targetIDs.filter(id => {
-			if (id === String(botID) || adminIDs.includes(id)) {
-				skipped.push(id);
+			if (id === botID) {
+				skipped.push({ id, reason: "bot" });
+				return false;
+			}
+			if (ownerID && id === ownerID) {
+				skipped.push({ id, reason: "owner" });
 				return false;
 			}
 			return true;
 		});
 
 		if (validIDs.length === 0)
-			return api.sendMessage("⚠️ এডমিন বা বটকে কিক করা যাবে না!", threadID, event.messageID);
+			return api.sendMessage(
+				"⚠️ বট নিজেকে বা গ্রুপ ক্রিয়েটরকে কিক করা যাবে না!",
+				threadID,
+				event.messageID
+			);
+
+		// কতজন এডমিন কিক করতে যাচ্ছি
+		const adminTargets = validIDs.filter(id => adminIDs.includes(id));
 
 		await api.sendMessage(
-			`⚡ KICK STARTED\n👥 Total: ${validIDs.length}\n🚀 Fast mode ON`,
+			`⚡ KICK STARTED\n👥 Total: ${validIDs.length}\n` +
+			`🛡️ Admin targets: ${adminTargets.length}\n🚀 Fast mode ON`,
 			threadID
 		);
 
 		let kicked = 0;
 		let failed = 0;
+		const failedList = [];
 
-		// কলব্যাক দিয়ে আসল রেজাল্ট ধরা
 		await Promise.all(
 			validIDs.map(id =>
 				new Promise(resolve => {
 					api.removeUserFromGroup(id, threadID, (err) => {
-						if (err) failed++;
-						else kicked++;
+						if (err) {
+							failed++;
+							failedList.push(id);
+						} else {
+							kicked++;
+						}
 						resolve();
 					});
 				})
 			)
 		);
 
-		return api.sendMessage(
+		let resultMsg =
 			`╭──── FAST RESULT ────╮\n` +
 			`│ 👥 Total: ${validIDs.length}\n` +
 			`│ ✅ Kicked: ${kicked}\n` +
 			`│ ❌ Failed: ${failed}\n` +
-			`│ ⏭️ Skipped (admin): ${skipped.length}\n` +
+			`│ ⏭️ Skipped: ${skipped.length}\n` +
 			`│ ⚡ Mode: Ultra Fast\n` +
-			`╰────────────────────╯`,
-			threadID
-		);
+			`╰────────────────────╯`;
+
+		if (failed > 0) {
+			resultMsg +=
+				`\n\n⚠️ ${failed} জনকে কিক দেওয়া যায়নি।\n` +
+				`সম্ভাব্য কারণ: এডমিনকে কিক দিতে হলে বটকে গ্রুপ ক্রিয়েটর হতে হবে অথবা Facebook ব্লক করেছে।`;
+		}
+
+		return api.sendMessage(resultMsg, threadID);
 
 	} catch (err) {
 		console.log(err);
