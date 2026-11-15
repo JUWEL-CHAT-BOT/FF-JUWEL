@@ -28,12 +28,12 @@ function creditOk() {
 
 module.exports.config = {
   name: "uid",
-  version: "2.1.0",
+  version: "2.2.0",
   hasPermssion: 0,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "Show a small cover card with photo, name and UID",
   commandCategory: "Info",
-  usages: "uid (reply to someone, or use it for yourself)",
+  usages: "uid (reply to someone, mention someone, or use it for yourself)",
   cooldowns: 5,
   dependencies: {
     "fs-extra": "",
@@ -155,17 +155,22 @@ async function makeCard(name, uid, picBuffer) {
 }
 
 module.exports.run = async function ({ api, event }) {
-  const { threadID, messageID, senderID, messageReply } = event;
+  const { threadID, messageID, senderID, messageReply, mentions } = event;
 
   // 🔒 Credit lock
   if (!creditOk()) {
     return api.sendMessage("⛔ Credit was changed! Command disabled.", threadID, messageID);
   }
 
-  // Reply > self
-  const uid = String(
-    messageReply && messageReply.senderID ? messageReply.senderID : senderID
-  );
+  // Priority: reply > mention > self
+  let uid;
+  if (messageReply && messageReply.senderID) {
+    uid = String(messageReply.senderID);
+  } else if (mentions && Object.keys(mentions).length > 0) {
+    uid = String(Object.keys(mentions)[0]);
+  } else {
+    uid = String(senderID);
+  }
 
   const imgPath = path.join(__dirname, "cache", `uid_${uid}_${Date.now()}.png`);
 
