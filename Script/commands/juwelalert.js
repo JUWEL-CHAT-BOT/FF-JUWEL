@@ -4,6 +4,17 @@
  *  Credit : 乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐
  * ╚══════════════════════════════════════════════════════════╝
  *
+ *  v2.0.1 — "Account blocked … automated behavior (Code: 1357001)" WARN লাইন আর সন্দেহ/ALERT-এর কারণ নয়
+ *           (বট চালু থাকলেও এটা আসে)। স্ট্যাটাসে VERSION দেখায়।
+ *  v2.0.0 — ভুল (false) নোটিশ বন্ধ: এখন নোটিশ যাবে শুধু তখনই যখন সত্যিই আইডি লগআউট/বট বন্ধ।
+ *           ① লগে "checkpoint/login failed" ইত্যাদি লাইন দেখলেই আর সাথে সাথে ALERT নয় —
+ *             শুধু সন্দেহ ধরা হয়, ৩ মিনিট পর ফেসবুকে সরাসরি যাচাই করে (৩ বার), সত্যি মৃত হলে তবেই ALERT।
+ *           ② টানা ৩ বার probe ব্যর্থ + পাঠানোর ঠিক আগে আবার যাচাই। ১০ মিনিটের মধ্যে কোনো ইভেন্ট
+ *             (মেসেজ ইত্যাদি) এলে বট বেঁচে আছে ধরা হয়।
+ *           ③ রিস্টার্ট ≠ বন্ধ: process.exit / ক্র্যাশ / নিজে থেমে যাওয়ার পর ওয়াচডগ ২ মিনিট দেখে —
+ *             বট আবার চালু হয়ে গেলে "STOPPED" নোটিশ যায় না। না ফিরলে (বা ১৫ মিনিটে ৩+ বার ক্র্যাশ-লুপ হলে) যায়।
+ *           ④ ৫ মিনিটের মধ্যে রিস্টার্ট হলে বারবার "STARTED" নোটিশও যায় না।
+ *           ⑤ Ctrl+C / stop সিগন্যাল (SIGTERM ইত্যাদি) এ আগের মতোই সাথে সাথে STOPPED যায়।
  *  v1.9.0 — একসাথে ৫-৬টা "STOPPED" নোটিশ আসার সমস্যা ঠিক: পাঠানোর আগেই ফাইল-লক দিয়ে
  *           দখল (claim) নেওয়া হয়, তাই রিস্টার্ট/ওয়াচডগ একসাথে পাঠাতে পারে না।
  *           ALERT নোটিশেও চালু থাকার সময় + STARTED যোগ। রিস্টার্ট লুপে সময় ০ থেকে শুরু হয় না
@@ -28,6 +39,8 @@ const IS_WATCHER = require.main === module && process.argv.includes("--juwel-wat
 if (!IS_WATCHER) { try { console.log("[JuwelAlert] ফাইল লোড হয়েছে (juwelalert.js)"); } catch (_) {} }
 
 const axios = require("axios");
+const FS = require("fs");
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* ───────────── config.json থেকে সেটিংস ───────────── */
 (function loadAlertSettings() {
@@ -45,12 +58,17 @@ const axios = require("axios");
 })();
 
 const PROBE_EVERY_MS = Number(process.env.JUWEL_PROBE_MS) || 2 * 60 * 1000;
-const PROBE_FAILS_BEFORE_ALERT = 2;
+const PROBE_FAILS_BEFORE_ALERT = 3; // টানা এতবার ব্যর্থ হলে তবেই যাচাই-প্রক্রিয়া শুরু
 const BOOT_NOTICE_DELAY_MS = Number(process.env.JUWEL_BOOT_MS) || 20 * 1000;
-const LOGIN_GRACE_MS = Number(process.env.JUWEL_LOGIN_GRACE_MS) || 3 * 60 * 1000; // এর মধ্যে লগইন না হলে সতর্কতা
+const LOGIN_GRACE_MS = Number(process.env.JUWEL_LOGIN_GRACE_MS) || 5 * 60 * 1000; // এর মধ্যে লগইন না হলে সতর্কতা
 const STOP_NOTICE_WAIT_MS = 6000; // বন্ধ হওয়ার আগে নোটিশ পাঠাতে সর্বোচ্চ এত সময় অপেক্ষা
 const RECOVER_STABLE_MS = Number(process.env.JUWEL_RECOVER_MS) || 5 * 60 * 1000; // এতক্ষণ টানা সুস্থ থাকলে তবেই "ফিরে এসেছে"
 const EPISODE_MAX_MS = 6 * 60 * 60 * 1000; // নিরাপত্তা: ৬ ঘণ্টা পর লক নিজে খুলে যাবে
+const EVENT_ALIVE_MS = 10 * 60 * 1000; // এর মধ্যে কোনো ইভেন্ট এলে বট বেঁচে আছে ধরা হয়
+const SUSPECT_DELAY_MS = 3 * 60 * 1000; // লগে সন্দেহজনক লাইন দেখার পর এতক্ষণ অপেক্ষা করে তারপর যাচাই
+const RESTART_GRACE_MS = Number(process.env.JUWEL_RESTART_GRACE_MS) || 2 * 60 * 1000; // রিস্টার্টের জন্য ওয়াচডগের অপেক্ষা
+const LOOP_EXITS = 3; // এই সময়ের মধ্যে এতবার বন্ধ হলে ক্র্যাশ-লুপ ধরা হয়
+const LOOP_WINDOW_MS = 15 * 60 * 1000;
 
 /* ───────────── একবারই-পাঠানো লক (ফাইলে, প্রসেস-নিরাপদ) ───────────── */
 const LATCH_FILE = require("path").join(__dirname, "..", "..", "juwelalert.latch.json");
@@ -105,19 +123,35 @@ function release(key) {
 function clearLatch() { withFileLock(() => latchWrite({})); }
 
 /* ───────────── চালু থাকার সময় (রিস্টার্টেও টিকে থাকে) ───────────── */
+// run ফাইল: since (শুরুর সময়), seen (শেষ লগইন-সুস্থ সময়), pid, alive (প্রসেস বেঁচে থাকার সময়), exits (সাম্প্রতিক বন্ধের তালিকা)
+function runRead() {
+  try { return JSON.parse(FS.readFileSync(RUN_FILE, "utf8")) || {}; }
+  catch (_) { return {}; }
+}
+function runWrite(o) {
+  try { FS.writeFileSync(RUN_FILE, JSON.stringify(o)); } catch (_) {}
+}
 const PROC_START = Date.now() - Math.round(process.uptime() * 1000);
 const RUN_START = (function () {
   try {
-    const r = JSON.parse(require("fs").readFileSync(RUN_FILE, "utf8"));
+    const r = runRead();
     // ৫ মিনিটের মধ্যে রিস্টার্ট হলে আগের সময় থেকেই গোনা চলবে
     if (r && r.since && r.seen && PROC_START - r.seen < 5 * 60 * 1000) return r.since;
   } catch (_) {}
   return PROC_START;
 })();
+const IS_QUICK_RESTART = RUN_START < PROC_START - 5000; // ৫ মিনিটের মধ্যে রিস্টার্ট হয়েছে
 function saveRunInfo() {
   try {
-    if (global.client && global.client.api)
-      require("fs").writeFileSync(RUN_FILE, JSON.stringify({ since: RUN_START, seen: Date.now() }));
+    const prev = runRead();
+    const loggedIn = !!(global.client && global.client.api);
+    runWrite({
+      since: RUN_START,
+      seen: loggedIn ? Date.now() : (prev.seen || 0),
+      pid: process.pid,
+      alive: Date.now(),
+      exits: Array.isArray(prev.exits) ? prev.exits : []
+    });
   } catch (_) {}
 }
 const fmtDate = (ms) => {
@@ -137,6 +171,10 @@ const state = global.__juwelAlert || (global.__juwelAlert = {
   lastProbeAt: 0,
   lastAlertAt: 0,
   alertSending: false,
+  confirming: false,
+  confirmedDeadAt: 0,
+  suspectTimer: null,
+  lastEventAt: 0,
   okSince: 0,
   down: false,
   downSince: 0,
@@ -185,10 +223,17 @@ function adminIDs() {
   return [...new Set([...(c.ADMINBOT || []), ...(c.DEVELOPER || [])].map(String))];
 }
 
-// সাম্প্রতিক লক/লগইন সমস্যা ধরা পড়ে থাকলে কারণের আগে বসানো হয়
+// শুধু যাচাই করে সত্যিই মৃত প্রমাণ হলে (গত ১৫ মিনিটে) কারণের আগে বসানো হয়
 function withLock(reason) {
-  if (state.lockAt && Date.now() - state.lockAt < 15 * 60 * 1000) {
-    return "🔒 ফেসবুক আইডি লক/লগইন সমস্যা (" + state.lockReason + ") — " + reason;
+  if (state.confirmedDeadAt && Date.now() - state.confirmedDeadAt < 15 * 60 * 1000) {
+    return "🔒 ফেসবুক আইডি লক/লগইন সমস্যা (যাচাই করা) — " + reason;
+  }
+  return reason;
+}
+// লগে সন্দেহজনক লাইন দেখা গেলে শুধু "তথ্য" হিসেবে যোগ হয় (দাবি হিসেবে নয়)
+function withHint(reason) {
+  if (state.lockAt && state.lockReason && Date.now() - state.lockAt < 5 * 60 * 1000) {
+    return reason + " | শেষ লগ: " + state.lockReason;
   }
   return reason;
 }
@@ -238,21 +283,64 @@ async function sendMessengerToAdmins(text) {
   }
 }
 
+/* ───────────── সেশন সত্যিই বেঁচে আছে কি না — সরাসরি যাচাই ───────────── */
+const eventRecent = () => !!state.lastEventAt && Date.now() - state.lastEventAt < EVENT_ALIVE_MS;
+
+// ফেসবুক থেকে নিজের তথ্য আনার চেষ্টা; সফল হলে true
+function checkAlive(timeoutMs) {
+  return new Promise((resolve) => {
+    const api = global.client && global.client.api;
+    if (!api || typeof api.getCurrentUserID !== "function" || typeof api.getUserInfo !== "function") return resolve(false);
+    let uid; try { uid = api.getCurrentUserID(); } catch (_) {}
+    if (!uid) return resolve(false);
+    let done = false;
+    const t = setTimeout(() => { if (!done) { done = true; resolve(false); } }, timeoutMs || 20000);
+    try {
+      api.getUserInfo(uid, (err) => { if (done) return; done = true; clearTimeout(t); resolve(!err); });
+    } catch (_) { done = true; clearTimeout(t); resolve(false); }
+  });
+}
+
+// ৩ বার (১৫ সেকেন্ড ফাঁকে) যাচাই করে; একবারও সুস্থ পেলে বা সম্প্রতি ইভেন্ট এলে "মৃত নয়"
+async function confirmDead() {
+  if (eventRecent()) return false;
+  for (let i = 0; i < 3; i++) {
+    if (await checkAlive(20000)) return false;
+    if (eventRecent()) return false;
+    if (i < 2) await sleep(15000);
+  }
+  return true;
+}
+
 /* ───────────── alerts ───────────── */
 const HEAD = (title) => "╔══════════════════╗\n   " + title + "\n╚══════════════════╝";
 const LINE = "━━━━━━━━━━━━━━━━━━━━";
 
-// লক/সেশন সমস্যার নোটিশ — একটা সমস্যায় মাত্র একবার (রিস্টার্ট হলেও)
+// লক/সেশন সমস্যার নোটিশ — যাচাইয়ে সত্যিই মৃত প্রমাণ হলে, একটা সমস্যায় মাত্র একবার (রিস্টার্ট হলেও)
 async function raiseAlert(reason) {
   const now = Date.now();
-  if (!state.down) { state.down = true; state.downSince = now; }
   if (!canSend("alert")) return; // আগেই একবার গেছে বা কেউ পাঠাচ্ছে
-  // পাঠানো চলছে, বা আগের চেষ্টা ব্যর্থ হয়ে থাকলে ১ মিনিটের আগে আবার নয়
-  if (state.alertSending || now - state.lastAlertAt < 60 * 1000) return;
+  // যাচাই/পাঠানো চলছে, বা আগের চেষ্টা ব্যর্থ হয়ে থাকলে ১ মিনিটের আগে আবার নয়
+  if (state.alertSending || state.confirming || now - state.lastAlertAt < 60 * 1000) return;
+
+  // পাঠানোর ঠিক আগে শেষবার যাচাই — সুস্থ থাকলে কোনো নোটিশ নয়
+  state.confirming = true;
+  let dead = false;
+  try { dead = await confirmDead(); } catch (_) {}
+  state.confirming = false;
+  if (!dead) {
+    state.probeFails = 0; state.lockAt = 0; state.lockReason = "";
+    log("সন্দেহ হয়েছিল, কিন্তু যাচাইয়ে সেশন সুস্থ — নোটিশ পাঠানো হয়নি।", "info");
+    return;
+  }
+
+  state.confirmedDeadAt = Date.now();
+  if (!state.down) { state.down = true; state.downSince = state.confirmedDeadAt; }
+  if (!canSend("alert")) return;
   if (!claim("alert")) return; // অন্য প্রসেস আগেই দখল নিয়েছে
   state.alertSending = true;
-  state.lastAlertAt = now;
-  const upA = uptimeParts((now - RUN_START) / 1000);
+  state.lastAlertAt = Date.now();
+  const upA = uptimeParts((Date.now() - RUN_START) / 1000);
   const text =
     HEAD("🚨 JUWEL BOT • ALERT") + "\n\n" +
     "🔴 STATUS ➤ SESSION PROBLEM\n" + LINE + "\n" +
@@ -261,7 +349,7 @@ async function raiseAlert(reason) {
     "📅 STARTED ➤ " + fmtDate(RUN_START) + "\n" +
     "🕒 TIME ➤ " + dhakaTime() + "\n" + LINE + "\n" +
     "🛠 করণীয়: নতুন appstate.json (কুকি) বসিয়ে বট রিস্টার্ট দিন।";
-  log("সতর্কতা: " + reason, "error");
+  log("সতর্কতা (যাচাই করা): " + reason, "error");
   try {
     const ok = await sendExternal(text);
     if (ok) markSent("alert"); else release("alert");
@@ -278,7 +366,7 @@ async function raiseRecovery() {
   const downFor = Date.now() - since;
   clearLatch(); // নতুন সমস্যা হলে আবার একবার নোটিশ যাবে
   state.down = false; state.downSince = 0; state.probeFails = 0; state.lastAlertAt = 0;
-  state.lockAt = 0; state.lockReason = ""; state.okSince = 0;
+  state.lockAt = 0; state.lockReason = ""; state.okSince = 0; state.confirmedDeadAt = 0;
   if (!hadAlert) return; // শুধু সাধারণ বন্ধ/চালু হলে আলাদা "ফিরে এসেছে" নোটিশ নয়
   const text =
     HEAD("✅ JUWEL BOT • BACK ONLINE") + "\n\n" +
@@ -310,14 +398,20 @@ function stopText(reason, startMs, endMs) {
 }
 
 // ওয়াচডগকে লাইন পাঠায় (SENT / REASON:... / CRASH:... / EXIT:...)
-//   REASON = বট নিজে নোটিশ পাঠাচ্ছে (ব্যর্থ হলে ওয়াচডগ এই কারণসহ আবার পাঠাবে)
-//   CRASH  = শুধু সম্ভাব্য কারণ জানিয়ে রাখা (বট হঠাৎ মরলে ওয়াচডগ এটা ব্যবহার করবে)
+//   SENT   = বট নিজে নোটিশ পাঠিয়ে ফেলেছে
+//   REASON = বন্ধ হওয়ার কারণ (ওয়াচডগ রিস্টার্ট না হলে এই কারণসহ নোটিশ পাঠাবে)
+//   CRASH  = সম্ভাব্য ক্র্যাশ-কারণ
+//   EXIT   = প্রসেসের exit code
 function watchSend(line) {
   try {
     const w = global.__juwelAlertWatcher;
     if (w && w.stdin && w.stdin.writable) w.stdin.write(line + "\n");
   } catch (_) {}
 }
+const hasWatchdog = () => {
+  const w = global.__juwelAlertWatcher;
+  return !!(w && w.stdin && w.stdin.writable);
+};
 
 // বাইরের হার্টবিট সার্ভিসকে সাথে সাথে "ফেল" জানায়
 function heartbeatFail() {
@@ -326,10 +420,10 @@ function heartbeatFail() {
   try { axios.get(HB.replace(/\/$/, "") + "/fail", { timeout: 5000 }).catch(() => {}); } catch (_) {}
 }
 
-// একবারই পাঠায়; একই promise ফেরত দেয় যাতে exit তার জন্য অপেক্ষা করতে পারে
+// সাথে সাথে পাঠায় (stop সিগন্যাল বা ওয়াচডগ না থাকলে); একই promise ফেরত দেয় যাতে exit তার জন্য অপেক্ষা করতে পারে
 function sendStopNotice(reason) {
   if (stopPromise) return stopPromise;
-  reason = withLock(reason);
+  reason = withHint(withLock(reason));
   log("বট বন্ধ হচ্ছে: " + reason, "warn");
   watchSend("REASON:" + reason);
   heartbeatFail();
@@ -354,16 +448,24 @@ function installShutdownHook() {
 
   const origExit = process.exit.bind(process);
 
-  // কমান্ড/কোড/লগইন-এরর হ্যান্ডলার থেকে process.exit() ডাকলে — আগে নোটিশ, তারপর বন্ধ
+  // কমান্ড/কোড/লগইন-এরর হ্যান্ডলার থেকে process.exit() ডাকলে:
+  //   ওয়াচডগ থাকলে → কারণ জানিয়ে বন্ধ; ওয়াচডগ ২ মিনিট দেখবে বট ফিরল কি না (ফিরলে নোটিশ নয়)
+  //   ওয়াচডগ না থাকলে → আগের মতো আগে নোটিশ, তারপর বন্ধ
   process.exit = function (code) {
     const c = code === undefined ? 0 : code;
-    sendStopNotice("process.exit(" + c + ") — কোড দিয়ে বন্ধ করা হয়েছে").then(
+    const why = "process.exit(" + c + ") — কোড দিয়ে বন্ধ/রিস্টার্ট করা হয়েছে";
+    if (hasWatchdog()) {
+      watchSend("REASON:" + withHint(why));
+      setTimeout(() => origExit(c), 150);
+      return;
+    }
+    sendStopNotice(why).then(
       () => origExit(c),
       () => origExit(c)
     );
   };
 
-  // Ctrl+C, systemd/pm2/docker stop, টার্মিনাল বন্ধ
+  // Ctrl+C, systemd/pm2/docker stop, টার্মিনাল বন্ধ — এগুলো স্পষ্ট বন্ধ, তাই সাথে সাথে নোটিশ
   const names = {
     SIGINT: "Ctrl+C (SIGINT)",
     SIGTERM: "stop সিগন্যাল (SIGTERM)",
@@ -380,10 +482,12 @@ function installShutdownHook() {
   });
 
   // লগইন ব্যর্থ হওয়ার পর কিছু চালু না থাকলে Node নিজে থেকেই থামে (process.exit ছাড়াই)।
-  // তখন এই ইভেন্টে নোটিশ পাঠানো হয়; পাঠানোর কাজ থাকায় প্রসেস নোটিশ শেষ হওয়া পর্যন্ত বাঁচে।
+  // ওয়াচডগ থাকলে সে-ই দেখবে বট ফিরল কি না; না থাকলে সাথে সাথে নোটিশ।
   try {
     process.on("beforeExit", () => {
-      sendStopNotice("বট নিজে থেকেই থেমে গেছে (কোনো কাজ বাকি নেই — লগইন ব্যর্থ/আইডি লক হতে পারে)");
+      const why = "বট নিজে থেকেই থেমে গেছে (কোনো কাজ বাকি নেই — লগইন ব্যর্থ/আইডি লক হতে পারে)";
+      if (hasWatchdog()) { watchSend("REASON:" + withHint(why)); return; }
+      sendStopNotice(why);
     });
   } catch (_) {}
 
@@ -391,8 +495,7 @@ function installShutdownHook() {
   try {
     process.on("uncaughtExceptionMonitor", (err) => {
       const r = "ক্র্যাশ — " + String((err && (err.stack || err.message)) || err).split("\n")[0].slice(0, 200);
-      watchSend("CRASH:" + withLock(r));
-      heartbeatFail();
+      watchSend("CRASH:" + withHint(withLock(r)));
     });
   } catch (_) {}
 
@@ -420,8 +523,22 @@ function startWatchdog() {
     child.unref();
     try { child.stdin.unref(); } catch (_) {}
     global.__juwelAlertWatcher = child;
-    log("watchdog চালু (pid " + child.pid + ") — ক্র্যাশ/kill/লক হলেও বন্ধ-নোটিশ যাবে।", "success");
+    log("watchdog চালু (pid " + child.pid + ") — সত্যিই বন্ধ হলে (রিস্টার্ট ছাড়া) নোটিশ যাবে।", "success");
   } catch (e) { log("watchdog চালু করা যায়নি: " + e.message, "warn"); }
+}
+
+// নতুন বট-প্রসেস চালু হয়ে গেছে কি না (run ফাইল দেখে)
+async function waitForRestart(parentPid, diedAt, ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    const r = runRead();
+    if (r.pid && r.pid !== parentPid && r.alive && r.alive >= diedAt - 5000) {
+      try { process.kill(r.pid, 0); return true; }
+      catch (e) { if (e.code === "EPERM") return true; }
+    }
+    await sleep(2000);
+  }
+  return false;
 }
 
 // ওয়াচডগ প্রসেসের ভেতরের কাজ
@@ -453,30 +570,49 @@ function runWatcher() {
   const finish = async () => {
     if (finishing) return;
     finishing = true;
+    const diedAt = Date.now();
     // বট মরে গেছে, তাই আর কোনো SENT আসবে না; পাইপের বাকি ডাটা পড়ার জন্য অল্প অপেক্ষা
-    await new Promise((r) => setTimeout(r, 300));
-    if (!handled) {
-      // বট নিজে পাঠানোর মাঝখানে মারা গেলে, তার দখলের মেয়াদ শেষ হওয়া পর্যন্ত অপেক্ষা
-      for (let i = 0; i < 25; i++) {
-        const p = latchRead().stop_p;
-        if (!p || Date.now() - p >= PENDING_MS) break;
-        await new Promise((r) => setTimeout(r, 1000));
+    await sleep(300);
+    if (handled) return process.exit(0); // বট নিজেই নোটিশ পাঠিয়ে গেছে
+
+    // বট নিজে পাঠানোর মাঝখানে মারা গেলে, তার দখলের মেয়াদ শেষ হওয়া পর্যন্ত অপেক্ষা
+    for (let i = 0; i < 25; i++) {
+      const p = latchRead().stop_p;
+      if (!p || Date.now() - p >= PENDING_MS) break;
+      await sleep(1000);
+    }
+
+    // এই বন্ধ হওয়াটা তালিকায় লিখি; ১৫ মিনিটে ৩+ বার হলে ক্র্যাশ-লুপ
+    const r0 = runRead();
+    const exits = (Array.isArray(r0.exits) ? r0.exits : []).filter((t) => diedAt - t < LOOP_WINDOW_MS);
+    exits.push(diedAt);
+    r0.exits = exits;
+    runWrite(r0);
+    const loop = exits.length >= LOOP_EXITS;
+
+    // রিস্টার্ট ≠ বন্ধ: বট নিজে আবার চালু হয়ে গেলে কোনো নোটিশ নয়
+    if (!loop) {
+      const back = await waitForRestart(parentPid, diedAt, RESTART_GRACE_MS);
+      if (back) return process.exit(0);
+    }
+
+    // বট ফেরেনি (বা বারবার ক্র্যাশ করছে) — এই সমস্যায় আগে STOPPED না গিয়ে থাকলে ওয়াচডগ পাঠাবে
+    if (claim("stop")) {
+      let why = reason || crash ||
+        (exitCode !== null && exitCode !== "undefined"
+          ? "বট বন্ধ হয়েছে (exit code " + exitCode + ")"
+          : "হঠাৎ বন্ধ — kill -9 / মেমরি শেষ / হোস্ট জোর করে বন্ধ করেছে");
+      if (loop) why = "বট ১৫ মিনিটে " + exits.length + " বার বন্ধ/রিস্টার্ট হয়েছে (ক্র্যাশ-লুপ) — " + why;
+      else why += " — " + Math.round(RESTART_GRACE_MS / 1000) + " সেকেন্ডেও বট আবার চালু হয়নি";
+      heartbeatFail();
+      const msg = stopText(why + " [watchdog]", startMs, diedAt);
+      // একবার ব্যর্থ হলে আরও ২ বার চেষ্টা
+      let sentOk = false;
+      for (let i = 0; i < 3 && !sentOk; i++) {
+        try { sentOk = await sendExternal(msg); } catch (_) {}
+        if (!sentOk) await sleep(1500);
       }
-      // বট নিজে পাঠায়নি এবং এই সমস্যায় আগে STOPPED যায়নি — তখনই ওয়াচডগ পাঠাবে
-      if (claim("stop")) {
-        const why = reason || crash ||
-          (exitCode !== null && exitCode !== "undefined"
-            ? "বট বন্ধ হয়েছে (exit code " + exitCode + ")"
-            : "হঠাৎ বন্ধ — kill -9 / মেমরি শেষ / হোস্ট জোর করে বন্ধ করেছে");
-        const msg = stopText(why + " [watchdog]", startMs, Date.now());
-        // একবার ব্যর্থ হলে আরও ২ বার চেষ্টা
-        let sentOk = false;
-        for (let i = 0; i < 3 && !sentOk; i++) {
-          try { sentOk = await sendExternal(msg); } catch (_) {}
-          if (!sentOk) await new Promise((r) => setTimeout(r, 1500));
-        }
-        if (sentOk) markSent("stop"); else release("stop");
-      }
+      if (sentOk) markSent("stop"); else release("stop");
     }
     process.exit(0);
   };
@@ -502,20 +638,34 @@ const BAD_PATTERNS = [
 ];
 const GOOD_PATTERNS = [/recovered after \d+ attempt/i, /traffic resumed/i, /session established/i];
 
-// এগুলো লগে দেখলেই সতর্কতা (একবার) + ওয়াচডগকে কারণ জানানো হয় (বট মরার অপেক্ষা না করে)
+// এগুলো লগে দেখলে শুধু "সন্দেহ" ধরা হয় — সরাসরি নোটিশ নয়।
+// ৩ মিনিট পর ফেসবুকে নিজে যাচাই করে সত্যিই মৃত পেলে তবেই ALERT যায়।
 const LOCK_PATTERNS = [
   /Error retrieving userID/i,
   /login[_ ]?blocked/i,
-  /checkpoint/i,
-  /account.{0,40}(locked|disabled|suspended|restricted|blocked)/i,
-  /(locked|disabled|suspended|blocked).{0,40}account/i,
   /(Fresh )?login failed/i,
-  /login (approval|error)/i,
   /FATAL: Session/i,
   /Session looks dead/i,
   /not logged in/i,
   /appstate.{0,40}(die|dead|invalid|expired)/i
 ];
+
+// সন্দেহ ধরা: একবারই টাইমার বসে; সময় হলে raiseAlert (যা নিজেই যাচাই করে) ডাকে
+function suspect(why) {
+  if (state.suspectTimer) return;
+  state.suspectTimer = setTimeout(() => {
+    state.suspectTimer = null;
+    raiseAlert("লগে লগইন/লক সমস্যার ইঙ্গিত ছিল, যাচাইয়ে সেশন মৃত | লগ: " + why).catch(() => {});
+  }, SUSPECT_DELAY_MS);
+  if (state.suspectTimer.unref) state.suspectTimer.unref();
+}
+function clearSuspect() {
+  if (state.suspectTimer) { clearTimeout(state.suspectTimer); state.suspectTimer = null; }
+}
+
+// ফেসবুকের "Account blocked / automated behavior (1357001)" একটা সাধারণ WARN — বট চালু থাকলেও আসে।
+// এটা লগআউট নয়, তাই এই লাইন দেখে সন্দেহও ধরা হয় না।
+const IGNORE_LOCK = /1357001|Account Status|detected automated behavio/i;
 
 function installLogWatcher() {
   if (global.__juwelAlertLogHooked) return;
@@ -526,23 +676,22 @@ function installLogWatcher() {
       try {
         const line = stripAnsi(Array.prototype.map.call(arguments, (a) => (typeof a === "string" ? a : "")).join(" "));
         if (line && line.length < 2000 && !/JuwelAlert/.test(line) && line.indexOf("📩") === -1) {
-          if (LOCK_PATTERNS.some((r) => r.test(line))) {
+          if (!IGNORE_LOCK.test(line) && LOCK_PATTERNS.some((r) => r.test(line))) {
             const short = line.trim().slice(0, 160);
             state.lockAt = Date.now();
             state.lockReason = short;
-            state.okSince = 0; // লক দেখা গেলে "সুস্থ থাকার" গণনা আবার শুরু
-            // বট এরপর মরলে ওয়াচডগ এই কারণটাই জানাবে
-            watchSend("CRASH:🔒 ফেসবুক আইডি লক/লগইন সমস্যা — " + short);
-            // নোটিশ একবারই যাবে (raiseAlert নিজেই লক দেখে)
-            raiseAlert("🔒 লক/লগইন সমস্যা ধরা পড়েছে | লগ: " + short);
+            state.okSince = 0; // সন্দেহ দেখা গেলে "সুস্থ থাকার" গণনা আবার শুরু
+            suspect(short);    // শুধু সন্দেহ; যাচাই না করে নোটিশ নয়
           }
           if (BAD_PATTERNS.some((r) => r.test(line))) {
             state.lastLoginIssueAt = Date.now();
             state.logHits.push({ t: Date.now(), line: line.trim().slice(0, 160) });
             if (state.logHits.length > 20) state.logHits.shift();
           } else if (GOOD_PATTERNS.some((r) => r.test(line))) {
-            // লগ দেখে আর "ফিরে এসেছে" নোটিশ নয় — শুধু গণনা রিসেট; রিকভারি যাচাই করে probe()
+            // বট নিজেই ঠিক হয়ে গেছে — সন্দেহ বাতিল
             state.lastLoginIssueAt = 0; state.logHits = []; state.probeFails = 0;
+            state.lockAt = 0; state.lockReason = "";
+            clearSuspect();
           }
         }
       } catch (_) {}
@@ -554,10 +703,11 @@ function installLogWatcher() {
 /* ───────────── active probe ───────────── */
 function evaluate(reason) {
   state.okSince = 0;
-  const recent = state.lastLoginIssueAt && (Date.now() - state.lastLoginIssueAt < 15 * 60 * 1000);
-  if (state.probeFails >= PROBE_FAILS_BEFORE_ALERT || (state.probeFails >= 1 && recent)) {
-    const extra = recent && state.logHits.length ? " | লগ: " + state.logHits[state.logHits.length - 1].line : "";
-    raiseAlert(reason + extra);
+  // সম্প্রতি ইভেন্ট (মেসেজ ইত্যাদি) এসেছে মানে বট বেঁচে আছে — ব্যর্থতা গোনা হবে না
+  if (eventRecent()) { state.probeFails = 0; return; }
+  if (state.probeFails >= PROBE_FAILS_BEFORE_ALERT) {
+    const extra = state.logHits.length ? " | লগ: " + state.logHits[state.logHits.length - 1].line : "";
+    raiseAlert(reason + extra).catch(() => {}); // raiseAlert পাঠানোর আগে নিজে আবার যাচাই করে
   }
 }
 
@@ -570,7 +720,10 @@ function probe() {
     if (Date.now() - state.bootAt < LOGIN_GRACE_MS) return;
     state.probeFails++;
     state.okSince = 0;
-    return raiseAlert(withLock("লগইন সম্পন্ন হয়নি (" + fmtDur(Date.now() - state.bootAt) + " ধরে api নেই) — আইডি লক/কুকি নষ্ট হতে পারে"));
+    if (state.probeFails >= PROBE_FAILS_BEFORE_ALERT) {
+      raiseAlert("লগইন সম্পন্ন হয়নি (" + fmtDur(Date.now() - state.bootAt) + " ধরে api নেই) — আইডি লক/কুকি নষ্ট হতে পারে").catch(() => {});
+    }
+    return;
   }
   let uid;
   try { uid = api.getCurrentUserID(); } catch (_) {}
@@ -621,6 +774,7 @@ function startHeartbeat() {
 
 /* ───────────── boot ───────────── */
 function start() {
+  if (!creditOk) return; // Credit বদলানো হলে কিছুই চালু হবে না
   if (state.started) return;
   state.started = true;
   installLogWatcher();
@@ -638,6 +792,7 @@ function start() {
   const sendBoot = async () => {
     const o = latchRead();
     if (o.alert || o.stop || o.alert_p || o.stop_p) return; // আইডি লক/সেশন সমস্যা চলছে — "STARTED" নোটিশ নয়
+    if (IS_QUICK_RESTART) return; // ৫ মিনিটের মধ্যে রিস্টার্ট — বারবার "STARTED" নয়
     const text =
       HEAD("🟢 JUWEL BOT • STARTED") + "\n\n" +
       "🟢 STATUS ➤ ONLINE\n" + LINE + "\n" +
@@ -680,6 +835,7 @@ function healthText() {
   return (
     HEAD("🤖 JUWEL BOT • STATUS") + "\n\n" +
     (state.down ? "🔴 STATUS ➤ PROBLEM" : "🟢 STATUS ➤ ONLINE") + "\n" + LINE + "\n" +
+    "🧩 VERSION ➤ 2.0.1\n" + LINE + "\n" +
     "⏱ UPTIME\n" + uptimeLines(up) + "\n" + LINE + "\n" +
     "📅 STARTED ➤ " + fmtDate(RUN_START) + "\n" +
     "🕒 NOW ➤ " + dhakaTime() + "\n" + LINE + "\n" +
@@ -721,8 +877,8 @@ function testText() {
     " └ 💓 HEARTBEAT ➤ " + hb + "\n" + LINE + "\n" +
     "🔔 আপনি যা যা জানতে পারবেন\n" +
     " ┌ 🟢 বট চালু হলে\n" +
-    " ├ 🔴 বট বন্ধ হলে (ক্র্যাশ/আইডি লক সহ) — একবার\n" +
-    " ├ 🚨 সেশন/লগইন সমস্যা হলে — একবার\n" +
+    " ├ 🔴 বট সত্যিই বন্ধ হলে (ক্র্যাশ/আইডি লক সহ) — একবার\n" +
+    " ├ 🚨 যাচাই-করা সেশন/লগইন সমস্যা হলে — একবার\n" +
     " └ ✅ সেশন ফিরে এলে\n" + LINE + "\n" +
     uptimeBlock() + "\n" + LINE + "\n" +
     "⚙️ COMMANDS ➤ " + cmds + "\n" +
@@ -780,7 +936,7 @@ const withCredit = (t) => fx(t) + "\n" + LINE + "\n" + infoBlock() + "\n" + LINE
 module.exports.config = {
   name: "juwelalert",
   aliases: ["jalert"],
-  version: "1.9.0",
+  version: "2.0.1",
   hasPermssion: 2,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "সেশন সতর্কতা ও বট চালু/বন্ধ নোটিশ",
@@ -789,17 +945,38 @@ module.exports.config = {
   cooldowns: 5
 };
 
+/* ───────────── Credit সুরক্ষা ───────────── */
+// Credit (ফাইলের হেডার, CREDIT ধ্রুবক, config.credits) বদলালে বা মুছলে পুরো কোড বন্ধ হয়ে যাবে।
+const CREDIT_HASH = "8f74924e81a157abaf089d90717e48a4949617a7379d20a2df567cb0ab0dad81";
+const creditOk = (function () {
+  try {
+    const h = (x) => require("crypto").createHash("sha256").update(String(x)).digest("hex");
+    let src = "";
+    try { src = FS.readFileSync(__filename, "utf8"); } catch (_) {}
+    return h(CREDIT) === CREDIT_HASH &&
+      h(module.exports.config.credits) === CREDIT_HASH &&
+      src.split(CREDIT).length - 1 >= 3;
+  } catch (_) { return false; }
+})();
+const CREDIT_WARN = "⚠️ Credit পরিবর্তন করা হয়েছে — তাই এই কোড কাজ করবে না।\nআসল Credit ফিরিয়ে দিন।";
+if (!creditOk && !IS_WATCHER) { try { console.error("[JuwelAlert] " + CREDIT_WARN.replace(/\n/g, " ")); } catch (_) {} }
+
 module.exports.onLoad = function () {
+  if (!creditOk) throw new Error("Credit পরিবর্তন করা হয়েছে — juwelalert কাজ করবে না।");
   try { start(); } catch (e) { log("start ত্রুটি: " + e.message, "error"); }
 };
 
+// প্রতিটি ইভেন্ট = বট বেঁচে আছে (ভুল ALERT ঠেকানোর সংকেত)।
 // onLoad না চললেও (কিছু লোডারে) প্রথম ইভেন্টেই চালু হয়ে যাবে
 module.exports.handleEvent = function () {
+  if (!creditOk) return;
+  state.lastEventAt = Date.now();
   if (!state.started) { try { start(); } catch (_) {} }
 };
 
 module.exports.run = async function ({ api, event, args }) {
   const { threadID, messageID } = event;
+  if (!creditOk) return api.sendMessage(CREDIT_WARN, threadID, messageID);
   if (!state.started) start();
   if ((args[0] || "").toLowerCase() === "test") {
     const ok = await sendExternal(testText());
@@ -810,6 +987,7 @@ module.exports.run = async function ({ api, event, args }) {
 
 // ওয়াচডগ মোডে শুধু নজরদারি চলে; নইলে স্বাভাবিকভাবে চালু
 if (IS_WATCHER) {
+  if (!creditOk) process.exit(0);
   try { runWatcher(); } catch (_) { process.exit(1); }
 } else {
   // ফাইল লোড হওয়ার সাথে সাথেই চালু — onLoad/handleEvent না চললেও নজরদারি কাজ করবে
