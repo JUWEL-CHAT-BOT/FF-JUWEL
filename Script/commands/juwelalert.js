@@ -4,6 +4,14 @@
  *  Credit : 乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐
  * ╚══════════════════════════════════════════════════════════╝
  *
+ *  v2.0.2 — রিভিউয়ের পর সংশোধন:
+ *           ① latch/run ফাইল এখন atomic লেখা হয় (temp ফাইলে লিখে rename) — মাঝপথে মরলেও JSON নষ্ট হয় না।
+ *           ② heartbeat শুধু তখনই ping করে যখন বট সত্যিই সুস্থ (probe OK বা সম্প্রতি ইভেন্ট এসেছে)।
+ *           ③ ALERT পাঠানো ব্যর্থ হলে আর "down" ধরা হয় না — ফলে ভুল "BACK ONLINE" যায় না।
+ *           ④ ফাইল-লকের অপেক্ষায় CPU busy-wait নেই (Atomics.wait)।
+ *           ⑤ লগ ওয়াচার এখন console.error(err) এর Error অবজেক্টও পড়ে।
+ *           ⑥ process.exit ওভাররাইড: Windows ছাড়া অন্য OS-এ সাথে সাথে বন্ধ হয় (pipe লেখা synchronous)।
+ *           ⑦ শুধু TG_TOKEN বা শুধু TG_CHAT সেট থাকলে ওয়ার্নিং দেখায়। ভার্সন এক জায়গায় (VERSION)।
  *  v2.0.1 — "Account blocked … automated behavior (Code: 1357001)" WARN লাইন আর সন্দেহ/ALERT-এর কারণ নয়
  *           (বট চালু থাকলেও এটা আসে)। স্ট্যাটাসে VERSION দেখায়।
  *  v2.0.0 — ভুল (false) নোটিশ বন্ধ: এখন নোটিশ যাবে শুধু তখনই যখন সত্যিই আইডি লগআউট/বট বন্ধ।
@@ -32,6 +40,8 @@
  *  কমান্ড:  #juwelalert        (অবস্থা দেখায়, শুধু বট-অ্যাডমিন)
  *           #juwelalert test   (টেস্ট নোটিশ পাঠায়)
  */
+
+const VERSION = "2.0.2";
 
 // এই ফাইলকে `node juwelalert.js --juwel-watch` দিয়ে চালালে এটা ওয়াচডগ হিসেবে চলে
 const IS_WATCHER = require.main === module && process.argv.includes("--juwel-watch");
@@ -76,12 +86,31 @@ const LOCK_FILE = LATCH_FILE + ".lock";
 const RUN_FILE = require("path").join(__dirname, "..", "..", "juwelalert.run.json");
 const PENDING_MS = 20 * 1000; // "পাঠানো চলছে" ধরে নেওয়ার সর্বোচ্চ সময়
 
+// atomic লেখা: temp ফাইলে লিখে rename — মাঝপথে প্রসেস মরলেও আসল ফাইল নষ্ট হয় না
+function atomicWrite(file, text) {
+  const tmp = file + "." + process.pid + ".tmp";
+  try {
+    FS.writeFileSync(tmp, text);
+    FS.renameSync(tmp, file);
+  } catch (_) {
+    try { FS.unlinkSync(tmp); } catch (__) {}
+    // rename ব্যর্থ হলে (যেমন Windows-এ ফাইল ব্যস্ত) সরাসরি লেখার চেষ্টা
+    try { FS.writeFileSync(file, text); } catch (___) {}
+  }
+}
+
+// CPU না পুড়িয়ে অল্প সময় অপেক্ষা (sync)
+function syncSleep(ms) {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+  catch (_) { const end = Date.now() + ms; while (Date.now() < end) {} }
+}
+
 function latchRead() {
   try { return JSON.parse(require("fs").readFileSync(LATCH_FILE, "utf8")) || {}; }
   catch (_) { return {}; }
 }
 function latchWrite(o) {
-  try { require("fs").writeFileSync(LATCH_FILE, JSON.stringify(o)); } catch (_) {}
+  atomicWrite(LATCH_FILE, JSON.stringify(o));
 }
 // একসাথে একাধিক প্রসেস ভেতরে ঢুকতে পারবে না
 function withFileLock(fn) {
@@ -92,7 +121,7 @@ function withFileLock(fn) {
     catch (_) {
       try { if (Date.now() - fs.statSync(LOCK_FILE).mtimeMs > 5000) fs.unlinkSync(LOCK_FILE); } catch (__) {}
       if (Date.now() - t0 > 3000) break;
-      const end = Date.now() + 25; while (Date.now() < end) {}
+      syncSleep(25);
     }
   }
   try { return fn(); } finally { try { fs.unlinkSync(LOCK_FILE); } catch (_) {} }
@@ -129,7 +158,7 @@ function runRead() {
   catch (_) { return {}; }
 }
 function runWrite(o) {
-  try { FS.writeFileSync(RUN_FILE, JSON.stringify(o)); } catch (_) {}
+  atomicWrite(RUN_FILE, JSON.stringify(o));
 }
 const PROC_START = Date.now() - Math.round(process.uptime() * 1000);
 const RUN_START = (function () {
@@ -257,6 +286,8 @@ async function sendExternal(text) {
         log("Telegram পাঠানো যায়নি: " + (e.message || e), "warn");
       }
     })());
+  } else if (tgToken || tgChat) {
+    log("Telegram অসম্পূর্ণ সেট করা — JUWEL_TG_TOKEN ও JUWEL_TG_CHAT দুটোই লাগবে।", "warn");
   }
   if (dc) {
     jobs.push((async () => {
@@ -335,7 +366,6 @@ async function raiseAlert(reason) {
   }
 
   state.confirmedDeadAt = Date.now();
-  if (!state.down) { state.down = true; state.downSince = state.confirmedDeadAt; }
   if (!canSend("alert")) return;
   if (!claim("alert")) return; // অন্য প্রসেস আগেই দখল নিয়েছে
   state.alertSending = true;
@@ -352,7 +382,11 @@ async function raiseAlert(reason) {
   log("সতর্কতা (যাচাই করা): " + reason, "error");
   try {
     const ok = await sendExternal(text);
-    if (ok) markSent("alert"); else release("alert");
+    if (ok) {
+      markSent("alert");
+      // নোটিশ সত্যিই গেলে তবেই "সমস্যা চলছে" ধরা হয় (নইলে ভুল BACK ONLINE যেত)
+      if (!state.down) { state.down = true; state.downSince = state.confirmedDeadAt; }
+    } else release("alert");
   } catch (_) { release("alert"); }
   finally { state.alertSending = false; }
 }
@@ -456,8 +490,10 @@ function installShutdownHook() {
     const why = "process.exit(" + c + ") — কোড দিয়ে বন্ধ/রিস্টার্ট করা হয়েছে";
     if (hasWatchdog()) {
       watchSend("REASON:" + withHint(why));
-      setTimeout(() => origExit(c), 150);
-      return;
+      // Linux/macOS-এ pipe লেখা synchronous, তাই সাথে সাথে বন্ধ করা নিরাপদ (পরের লাইন চলবে না)।
+      // Windows-এ pipe async, তাই অল্প সময় দিয়ে বন্ধ করা হয়।
+      if (process.platform === "win32") { setTimeout(() => origExit(c), 150); return; }
+      return origExit(c);
     }
     sendStopNotice(why).then(
       () => origExit(c),
@@ -667,6 +703,13 @@ function clearSuspect() {
 // এটা লগআউট নয়, তাই এই লাইন দেখে সন্দেহও ধরা হয় না।
 const IGNORE_LOCK = /1357001|Account Status|detected automated behavio/i;
 
+// console আর্গুমেন্ট → টেক্সট (string ও Error দুটোই)
+const argToText = (a) => {
+  if (typeof a === "string") return a;
+  if (a instanceof Error) return String(a.message || a);
+  return "";
+};
+
 function installLogWatcher() {
   if (global.__juwelAlertLogHooked) return;
   global.__juwelAlertLogHooked = true;
@@ -674,7 +717,7 @@ function installLogWatcher() {
     const orig = console[method];
     console[method] = function () {
       try {
-        const line = stripAnsi(Array.prototype.map.call(arguments, (a) => (typeof a === "string" ? a : "")).join(" "));
+        const line = stripAnsi(Array.prototype.map.call(arguments, argToText).join(" "));
         if (line && line.length < 2000 && !/JuwelAlert/.test(line) && line.indexOf("📩") === -1) {
           if (!IGNORE_LOCK.test(line) && LOCK_PATTERNS.some((r) => r.test(line))) {
             const short = line.trim().slice(0, 160);
@@ -761,15 +804,21 @@ function probe() {
 }
 
 /* ───────────── heartbeat (ঐচ্ছিক, বাইরের মনিটর) ───────────── */
+// শুধু বট সত্যিই সুস্থ থাকলে ping যায়। probe ব্যর্থ (এবং সম্প্রতি কোনো ইভেন্টও নেই) হলে ping বন্ধ —
+// তাই সেশন মরলে বা বট হ্যাং হলে বাইরের মনিটরও সময়মতো ধরতে পারবে।
 function startHeartbeat() {
   const HB = process.env.JUWEL_HEARTBEAT_URL;
   if (!HB || global.__juwelAlertHeartbeat) return;
   global.__juwelAlertHeartbeat = true;
-  const ping = () => { try { axios.get(HB, { timeout: 10000 }).catch(() => {}); } catch (_) {} };
+  const healthy = () => state.lastProbeOk !== false || eventRecent();
+  const ping = () => {
+    if (!healthy()) return;
+    try { axios.get(HB, { timeout: 10000 }).catch(() => {}); } catch (_) {}
+  };
   ping();
   const h = setInterval(ping, 60 * 1000);
   if (h.unref) h.unref();
-  log("heartbeat চালু — বাইরের মনিটরে প্রতি ৬০ সেকেন্ডে ping যাবে।", "success");
+  log("heartbeat চালু — বট সুস্থ থাকলে প্রতি ৬০ সেকেন্ডে ping যাবে।", "success");
 }
 
 /* ───────────── boot ───────────── */
@@ -835,7 +884,7 @@ function healthText() {
   return (
     HEAD("🤖 JUWEL BOT • STATUS") + "\n\n" +
     (state.down ? "🔴 STATUS ➤ PROBLEM" : "🟢 STATUS ➤ ONLINE") + "\n" + LINE + "\n" +
-    "🧩 VERSION ➤ 2.0.1\n" + LINE + "\n" +
+    "🧩 VERSION ➤ " + VERSION + "\n" + LINE + "\n" +
     "⏱ UPTIME\n" + uptimeLines(up) + "\n" + LINE + "\n" +
     "📅 STARTED ➤ " + fmtDate(RUN_START) + "\n" +
     "🕒 NOW ➤ " + dhakaTime() + "\n" + LINE + "\n" +
@@ -936,7 +985,7 @@ const withCredit = (t) => fx(t) + "\n" + LINE + "\n" + infoBlock() + "\n" + LINE
 module.exports.config = {
   name: "juwelalert",
   aliases: ["jalert"],
-  version: "2.0.1",
+  version: VERSION,
   hasPermssion: 2,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "সেশন সতর্কতা ও বট চালু/বন্ধ নোটিশ",
