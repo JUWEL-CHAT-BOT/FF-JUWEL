@@ -29,6 +29,7 @@ module.exports = function ({
   power.guardApi(api); // ★ POWER
   const solo = require("./solo"); // ★ ALLBOT STOP/ON
   solo.guardApi(api); // ★ ALLBOT
+  require("./byebye").install(api); // ★ বন্ধ হওয়ার আগে সব গ্রুপে নোটিশ
   const moment = require("moment-timezone");
   const axios = require("axios");
 
