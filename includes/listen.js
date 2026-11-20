@@ -27,6 +27,8 @@ module.exports = function ({
   silent.guardApi(api); // ★ SILENT (১/৩)
   const power = require("./power"); // ★ POWER (বট অন/অফ)
   power.guardApi(api); // ★ POWER
+  const solo = require("./solo"); // ★ ALLBOT STOP/ON
+  solo.guardApi(api); // ★ ALLBOT
   const moment = require("moment-timezone");
   const axios = require("axios");
 
@@ -164,53 +166,35 @@ module.exports = function ({
     } catch (error) {}
   };
 
-  const handleReaction = ({
-    event
-  }) => {
-    try {
-      const isGroupThread =
-        String(event.threadID).length > 16;
-
-      const normEmoji = v =>
-        String(v == null ? '' : v)
-          .replace(/[\uFE0F\u200D]/g, '')
-          .trim();
-
-      if (
-        normEmoji(event.reaction) ===
-          normEmoji('🦵') &&
-        isGroupThread &&
-        String(event.userID) ===
-          String(global.config.ADMINBOT[0])
-      ) {
-        api.getMessage(
-          event.threadID,
-          event.messageID,
-          (err, data) => {
-            if (err || !data || !data.senderID) return;
-
-            const botID = api.getCurrentUserID();
-            const targetID = String(data.senderID);
-
-            if (
-              targetID === String(botID) ||
-              targetID === String(event.userID)
-            ) {
-              return;
-            }
-
-            api.removeUserFromGroup(
-              targetID,
-              event.threadID
-            );
-          }
-        );
-        return;
-      }
-    } catch (error) {
-      console.error(error);
-    }
+  // ── 🦵 রিয়েক্ট (কিক/লিভ): এখন সব কাজ includes/handle/handleReaction.js-এ ──
+  // মেসেজের মালিক চেনার জন্য ক্যাশ: কে কোন মেসেজ পাঠিয়েছে + বট নিজে কোন মেসেজ পাঠিয়েছে
+  const msgOwner = global.__msgOwner = global.__msgOwner || new Map();
+  const botMsgs = global.__botMsgs = global.__botMsgs || new Map();
+  const remember = (map, k, v, max) => {
+    if (!k) return;
+    map.delete(k);
+    map.set(k, v);
+    while (map.size > max) map.delete(map.keys().next().value);
   };
+  if (typeof api.sendMessage === "function" && !api.__sentTracked) {
+    const _send = api.sendMessage;
+    api.sendMessage = function (...args) {
+      const ci = args.findIndex((a, i) => i >= 2 && typeof a === "function");
+      if (ci >= 0) {
+        const cb = args[ci];
+        args[ci] = function (err, info) {
+          try { if (info && info.messageID) remember(botMsgs, String(info.messageID), 1, 3000); } catch (_) {}
+          return cb.apply(this, arguments);
+        };
+      }
+      const r = _send.apply(this, args);
+      if (r && typeof r.then === "function") {
+        r.then(info => { if (info && info.messageID) remember(botMsgs, String(info.messageID), 1, 3000); }).catch(() => {});
+      }
+      return r;
+    };
+    Object.defineProperty(api, "__sentTracked", { value: true, enumerable: false });
+  }
 
   const interactionDirectory =
     __dirname +
@@ -1023,6 +1007,8 @@ module.exports = function ({
       case "message":
       case "message_reply":
       case "message_unsend":
+        if (event.messageID && event.senderID) remember(msgOwner, String(event.messageID), String(event.senderID), 5000);
+
         await handleMention(
           api,
           event
@@ -1058,10 +1044,6 @@ module.exports = function ({
           event
         });
 
-        handleReaction({
-          event
-        });
-
         break;
 
       default:
@@ -1072,6 +1054,9 @@ module.exports = function ({
   // ★ SILENT (৩/৩): silent গেট
   return async event => {
     if (isDuplicateEvent(event)) return;
+
+    // ★ ALLBOT গেট: মাস্টার বটের "allbot stop" থাকলে এই বট ওই গ্রুপে চুপ থাকবে
+    if (solo.gate(api, event)) return;
 
     // ★ POWER গেট: অফ থাকলে শুধু ADMINBOT-এর "bot on" চলবে, বাকি সব বাদ
     if (power.gate(api, event)) return;
