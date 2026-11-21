@@ -18,18 +18,19 @@ const BAN_WINDOW_MS = 60000;
 const MAX_USES_IN_WINDOW = 4;
 const BAN_DURATION_MS = 5 * 60000;
 
-const MAX_ATTEMPTS = 6;              // ✅ ৩ থেকে ৬ করা হয়েছে
+const MAX_ATTEMPTS = 6;
 const CONNECT_TIMEOUT_MS = 15000;
 const DOWNLOAD_TIMEOUT_MS = 120000;
-const SEND_TIMEOUT_MS = 90000;       // ✅ সেন্ড হ্যাং হলে আটকে থাকবে না
+const SEND_TIMEOUT_MS = 90000;
 const LOCK_SAFETY_MS = 4 * 60000;
-const MAX_FILE_BYTES = 25 * 1024 * 1024; // ✅ Messenger লিমিট ~25MB
-const DEAD_LINK_MS = 10 * 60000;     // ✅ ফেইল করা লিংক ১০ মিনিট স্কিপ
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
+const DEAD_LINK_MS = 10 * 60000;
 
 module.exports.config = {
   name: "gan",
-  version: "2.0.0",
+  version: "2.1.0",
   hasPermission: 0,
+  hasPermssion: 0, // কিছু Mirai ভার্সনে এই বানানটাই লাগে
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "Play random song without prefix",
   commandCategory: "music",
@@ -165,8 +166,6 @@ function checkUserLimit(api, event) {
 }
 
 /* ─── Helpers ─── */
-
-// ✅ প্রথমে নির্ধারিত পুল, না পেলে অন্য পুল থেকে; মরা/চেষ্টা-করা লিংক বাদ
 function pickSong(preferredPool, tried) {
   const now = Date.now();
   const order = preferredPool === "old" ? ["old", "new"] : ["new", "old"];
@@ -210,33 +209,33 @@ async function downloadFile(url, filePath) {
     validateStatus: (s) => s >= 200 && s < 400,
   });
 
-  // ✅ HTML এরর পেজ হলে বাদ
   const type = String(res.headers["content-type"] || "").toLowerCase();
   if (type.includes("text/html")) {
     res.data.destroy();
     throw new Error("Link dead (HTML response)");
   }
 
-  // ✅ বেশি বড় ফাইল Messenger এ যায় না
   const len = parseInt(res.headers["content-length"] || "0", 10);
   if (len > MAX_FILE_BYTES) {
     res.data.destroy();
     throw new Error(`File too big (${Math.round(len / 1048576)}MB)`);
   }
 
+  const writer = fs.createWriteStream(filePath);
+  const pipePromise = pipelineAsync(res.data, writer);
+  pipePromise.catch(() => {}); // timeout হলে unhandled rejection আটকাবে
+
   let hardTimer;
   const hardTimeout = new Promise((_, reject) => {
     hardTimer = setTimeout(() => {
       res.data.destroy();
+      writer.destroy();
       reject(new Error("Download timeout"));
     }, DOWNLOAD_TIMEOUT_MS);
   });
 
   try {
-    await Promise.race([
-      pipelineAsync(res.data, fs.createWriteStream(filePath)),
-      hardTimeout,
-    ]);
+    await Promise.race([pipePromise, hardTimeout]);
   } finally {
     clearTimeout(hardTimer);
   }
@@ -246,7 +245,6 @@ async function downloadFile(url, filePath) {
   if (size > MAX_FILE_BYTES) throw new Error("File too big");
 }
 
-// ✅ callback না এলে ৯০ সেকেন্ডে এরর দিয়ে পরের গানে যাবে
 function sendFile(api, threadID, body, filePath) {
   return new Promise((resolve, reject) => {
     let done = false;
@@ -289,72 +287,97 @@ async function playSong(api, event) {
     setTimeout(() => downloading.delete(threadID), LOCK_SAFETY_MS)
   );
 
-  try { api.setMessageReaction("🎶", messageID, () => {}, true); } catch (_) {}
+  try {
+    try { api.setMessageReaction("🎶", messageID, () => {}, true); } catch (_) {}
 
-  const cacheDir = path.join(__dirname, "cache");
-  fs.ensureDirSync(cacheDir);
+    const cacheDir = path.join(__dirname, "cache");
+    fs.ensureDirSync(cacheDir);
 
-  const tried = [];
-  let lastError = null;
+    // সব লিংক dead মার্ক হয়ে থাকলে রিসেট করে নতুন করে চেষ্টা
+    if (!pickSong(nextPool, [])) deadLinks.clear();
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const pick = pickSong(nextPool, tried);
-    if (!pick) break;
+    const tried = [];
+    let lastError = null;
 
-    const { url, poolName } = pick;
-    tried.push(url);
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const pick = pickSong(nextPool, tried);
+      if (!pick) break;
 
-    const index = songLinks.indexOf(url);
-    const ext = path.extname(url.split("?")[0]) || ".mp3";
-    const isVideo = ext.toLowerCase() === ".mp4";
-    const filePath = path.join(cacheDir, `gan_${index + 1}_${Date.now()}${ext}`);
+      const { url, poolName } = pick;
+      tried.push(url);
 
-    try {
-      await downloadFile(url, filePath);
+      const index = songLinks.indexOf(url);
+      const ext = path.extname(url.split("?")[0]) || ".mp3";
+      const isVideo = ext.toLowerCase() === ".mp4";
+      const filePath = path.join(cacheDir, `gan_${index + 1}_${Date.now()}${ext}`);
 
-      const body = `🎧𝐉𝐔𝐖𝐄𝐋🔊
+      let downloaded = false;
+      try {
+        await downloadFile(url, filePath);
+        downloaded = true;
+
+        const body = `🎧𝐉𝐔𝐖𝐄𝐋🔊
 
 ${isVideo ? "🎬" : "🎵"} Song No: ${index + 1}/${songLinks.length}
 🔀 Mode: No Prefix
 
 Enjoy 🎶`;
 
-      await sendFile(api, threadID, body, filePath);
+        await sendFile(api, threadID, body, filePath);
 
-      safeUnlink(filePath);
-      lastInPool[poolName] = url;
-      nextPool = poolName === "old" ? "new" : "old";
-      releaseLock(threadID);
-      return;
-    } catch (e) {
-      lastError = e;
-      deadLinks.set(url, Date.now() + DEAD_LINK_MS);
-      console.error(`[GAN] Attempt ${attempt}/${MAX_ATTEMPTS} failed (song ${index + 1}, ${url}):`, e.message);
-      safeUnlink(filePath);
+        safeUnlink(filePath);
+        lastInPool[poolName] = url;
+        nextPool = poolName === "old" ? "new" : "old";
+        return;
+      } catch (e) {
+        lastError = e;
+        // শুধু ডাউনলোড ফেইল হলে লিংক dead; সেন্ড ফেইল হলে লিংক দোষী না
+        if (!downloaded) deadLinks.set(url, Date.now() + DEAD_LINK_MS);
+        console.error(`[GAN] Attempt ${attempt}/${MAX_ATTEMPTS} failed (song ${index + 1}, ${url}):`, e && e.message ? e.message : e);
+        safeUnlink(filePath);
+      }
     }
-  }
 
-  releaseLock(threadID);
-  api.sendMessage(
-    `❌ গান পাঠাতে সমস্যা হয়েছে, একটু পরে আবার চেষ্টা করুন।\nReason: ${lastError ? lastError.message : "No available song"}`,
-    threadID
-  );
+    api.sendMessage(
+      `❌ গান পাঠাতে সমস্যা হয়েছে, একটু পরে আবার চেষ্টা করুন।\nReason: ${lastError ? (lastError.message || lastError.errorDescription || "Unknown error") : "No available song"}`,
+      threadID
+    );
+  } catch (e) {
+    console.error("[GAN] Unexpected error:", e);
+  } finally {
+    releaseLock(threadID);
+  }
 }
 
 /* ─── No-prefix trigger ─── */
 module.exports.handleEvent = async function ({ api, event }) {
-  if (!event.body || !event.messageID) return;
-  if (processedMessages.has(event.messageID)) return;
-  processedMessages.add(event.messageID);
-  setTimeout(() => processedMessages.delete(event.messageID), 60000);
+  try {
+    if (!event || !event.body || !event.messageID) return;
 
-  const msg = event.body.trim().toLowerCase();
-  if (msg === "gan") {
+    const msg = String(event.body).trim().toLowerCase();
+    if (msg !== "gan") return;
+
+    if (processedMessages.has(event.messageID)) return;
+    processedMessages.add(event.messageID);
+    setTimeout(() => processedMessages.delete(event.messageID), 60000);
+
     if (!checkUserLimit(api, event)) return;
     return playSong(api, event);
+  } catch (e) {
+    console.error("[GAN] handleEvent error:", e);
   }
 };
 
-module.exports.run = async function () {
-  return;
+/* ─── Prefix দিয়ে (/gan) ─── */
+module.exports.run = async function ({ api, event }) {
+  try {
+    if (processedMessages.has(event.messageID)) return;
+    processedMessages.add(event.messageID);
+    setTimeout(() => processedMessages.delete(event.messageID), 60000);
+
+    if (!checkUserLimit(api, event)) return;
+    return playSong(api, event);
+  } catch (e) {
+    console.error("[GAN] run error:", e);
+  }
 };
