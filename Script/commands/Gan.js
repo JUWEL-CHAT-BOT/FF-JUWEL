@@ -13,19 +13,22 @@ const userCooldown = new Map();
 const userWarnings = new Map();
 const bannedUsers = new Map();
 
-const COOLDOWN_MS = 5000;           // ৫ সেকেন্ড cooldown
-const BAN_WINDOW_MS = 60000;        // ১ মিনিট window
-const MAX_USES_IN_WINDOW = 4;       // ১ মিনিটে সর্বোচ্চ ৪ বার
-const BAN_DURATION_MS = 5 * 60000;  // ৫ মিনিট ban
+const COOLDOWN_MS = 5000;
+const BAN_WINDOW_MS = 60000;
+const MAX_USES_IN_WINDOW = 4;
+const BAN_DURATION_MS = 5 * 60000;
 
-const MAX_ATTEMPTS = 3;             // ফেইল করলে সর্বোচ্চ ৩ বার অন্য গান try করবে
-const CONNECT_TIMEOUT_MS = 15000;   // লিংক সাড়া না দিলে ১৫ সেকেন্ডে পরের গানে যাবে
-const DOWNLOAD_TIMEOUT_MS = 120000; // পুরো ডাউনলোডের সর্বোচ্চ সময় ১২০ সেকেন্ড
-const LOCK_SAFETY_MS = 4 * 60000;   // লক আটকে গেলে ৪ মিনিট পর নিজে থেকে ছাড়বে
+const MAX_ATTEMPTS = 6;              // ✅ ৩ থেকে ৬ করা হয়েছে
+const CONNECT_TIMEOUT_MS = 15000;
+const DOWNLOAD_TIMEOUT_MS = 120000;
+const SEND_TIMEOUT_MS = 90000;       // ✅ সেন্ড হ্যাং হলে আটকে থাকবে না
+const LOCK_SAFETY_MS = 4 * 60000;
+const MAX_FILE_BYTES = 25 * 1024 * 1024; // ✅ Messenger লিমিট ~25MB
+const DEAD_LINK_MS = 10 * 60000;     // ✅ ফেইল করা লিংক ১০ মিনিট স্কিপ
 
 module.exports.config = {
   name: "gan",
-  version: "1.9.0",
+  version: "2.0.0",
   hasPermission: 0,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "Play random song without prefix",
@@ -34,7 +37,6 @@ module.exports.config = {
   cooldowns: 5,
 };
 
-// ─── পুরোনো লিংক ───
 const oldLinks = [
   "https://files.catbox.moe/etsdn9.mp3",
   "https://files.catbox.moe/ayepdz.mp3",
@@ -71,7 +73,6 @@ const oldLinks = [
   "https://files.catbox.moe/ap2yed.mp3",
 ];
 
-// ─── নতুন লিংক ───
 const newLinks = [
   "https://files.catbox.moe/lpjun8.mp4",
   "https://files.catbox.moe/zgcevz.mp4",
@@ -99,14 +100,13 @@ const newLinks = [
   "https://files.catbox.moe/3ck8tc.mp3",
 ];
 
-// ডুপ্লিকেট বাদ
 const OLD_POOL = [...new Set(oldLinks)];
 const NEW_POOL = [...new Set(newLinks)];
-const songLinks = [...OLD_POOL, ...NEW_POOL]; // মোট গানের সংখ্যা দেখানোর জন্য
+const songLinks = [...OLD_POOL, ...NEW_POOL];
 
-// একবার পুরোনো, একবার নতুন — এভাবে পালা করে আসবে
 let nextPool = "old";
-const lastInPool = { old: -1, new: -1 };
+const lastInPool = { old: null, new: null };
+const deadLinks = new Map(); // url -> কখন পর্যন্ত স্কিপ হবে
 
 /* ─── UI ─── */
 function uiBanNotice(remainingSec) {
@@ -165,19 +165,24 @@ function checkUserLimit(api, event) {
 }
 
 /* ─── Helpers ─── */
-function pickFromPool(poolName, exclude = []) {
-  const pool = poolName === "old" ? OLD_POOL : NEW_POOL;
-  let url;
-  let guard = 0;
-  do {
-    url = pool[Math.floor(Math.random() * pool.length)];
-    guard++;
-  } while (
-    (url === lastInPool[poolName] || exclude.includes(url)) &&
-    pool.length > exclude.length + 1 &&
-    guard < 50
-  );
-  return url;
+
+// ✅ প্রথমে নির্ধারিত পুল, না পেলে অন্য পুল থেকে; মরা/চেষ্টা-করা লিংক বাদ
+function pickSong(preferredPool, tried) {
+  const now = Date.now();
+  const order = preferredPool === "old" ? ["old", "new"] : ["new", "old"];
+
+  for (const name of order) {
+    const pool = name === "old" ? OLD_POOL : NEW_POOL;
+    let list = pool.filter(
+      (u) => !tried.includes(u) && !(deadLinks.get(u) > now)
+    );
+    const fresh = list.filter((u) => u !== lastInPool[name]);
+    if (fresh.length) list = fresh;
+    if (list.length) {
+      return { url: list[Math.floor(Math.random() * list.length)], poolName: name };
+    }
+  }
+  return null;
 }
 
 function releaseLock(threadID) {
@@ -197,18 +202,28 @@ async function downloadFile(url, filePath) {
     responseType: "stream",
     timeout: CONNECT_TIMEOUT_MS,
     maxRedirects: 10,
-    maxContentLength: Infinity,
-    maxBodyLength: Infinity,
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
       "Accept": "*/*",
-      "Referer": "https://catbox.moe/",
     },
     validateStatus: (s) => s >= 200 && s < 400,
   });
 
-  // পুরো ডাউনলোডের জন্য hard timeout (হ্যাং হলে যেন আটকে না থাকে)
+  // ✅ HTML এরর পেজ হলে বাদ
+  const type = String(res.headers["content-type"] || "").toLowerCase();
+  if (type.includes("text/html")) {
+    res.data.destroy();
+    throw new Error("Link dead (HTML response)");
+  }
+
+  // ✅ বেশি বড় ফাইল Messenger এ যায় না
+  const len = parseInt(res.headers["content-length"] || "0", 10);
+  if (len > MAX_FILE_BYTES) {
+    res.data.destroy();
+    throw new Error(`File too big (${Math.round(len / 1048576)}MB)`);
+  }
+
   let hardTimer;
   const hardTimeout = new Promise((_, reject) => {
     hardTimer = setTimeout(() => {
@@ -228,17 +243,34 @@ async function downloadFile(url, filePath) {
 
   const size = fs.statSync(filePath).size;
   if (size < 5000) throw new Error("File too small/corrupt");
+  if (size > MAX_FILE_BYTES) throw new Error("File too big");
 }
 
+// ✅ callback না এলে ৯০ সেকেন্ডে এরর দিয়ে পরের গানে যাবে
 function sendFile(api, threadID, body, filePath) {
   return new Promise((resolve, reject) => {
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      reject(new Error("Send timeout"));
+    }, SEND_TIMEOUT_MS);
+
     try {
       api.sendMessage(
         { body, attachment: fs.createReadStream(filePath) },
         threadID,
-        (err) => (err ? reject(err) : resolve())
+        (err) => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          err ? reject(err) : resolve();
+        }
       );
     } catch (e) {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
       reject(e);
     }
   });
@@ -252,7 +284,6 @@ async function playSong(api, event) {
     return api.sendMessage("⏳ আগের গান এখনো পাঠানো হচ্ছে, অপেক্ষা করুন...", threadID);
   }
 
-  // লক + safety timer
   downloading.set(
     threadID,
     setTimeout(() => downloading.delete(threadID), LOCK_SAFETY_MS)
@@ -263,13 +294,16 @@ async function playSong(api, event) {
   const cacheDir = path.join(__dirname, "cache");
   fs.ensureDirSync(cacheDir);
 
-  const poolName = nextPool; // এই কমান্ডের পালা
   const tried = [];
   let lastError = null;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const url = pickFromPool(poolName, tried);
+    const pick = pickSong(nextPool, tried);
+    if (!pick) break;
+
+    const { url, poolName } = pick;
     tried.push(url);
+
     const index = songLinks.indexOf(url);
     const ext = path.extname(url.split("?")[0]) || ".mp3";
     const isVideo = ext.toLowerCase() === ".mp4";
@@ -289,21 +323,20 @@ Enjoy 🎶`;
 
       safeUnlink(filePath);
       lastInPool[poolName] = url;
-      nextPool = poolName === "old" ? "new" : "old"; // সফল হলে পরের বার অন্য পুল
+      nextPool = poolName === "old" ? "new" : "old";
       releaseLock(threadID);
-      return; // সফল
+      return;
     } catch (e) {
       lastError = e;
-      console.error(`[GAN] Attempt ${attempt}/${MAX_ATTEMPTS} failed (song ${index + 1}):`, e.message);
+      deadLinks.set(url, Date.now() + DEAD_LINK_MS);
+      console.error(`[GAN] Attempt ${attempt}/${MAX_ATTEMPTS} failed (song ${index + 1}, ${url}):`, e.message);
       safeUnlink(filePath);
-      // পরের attempt এ অন্য গান try করবে, ইউজারকে কিছু দেখাবে না
     }
   }
 
-  // ৩ বারই ফেইল করলে তবেই এরর দেখাবে
   releaseLock(threadID);
   api.sendMessage(
-    `❌ গান পাঠাতে সমস্যা হয়েছে, একটু পরে আবার চেষ্টা করুন।\nReason: ${lastError ? lastError.message : "Unknown"}`,
+    `❌ গান পাঠাতে সমস্যা হয়েছে, একটু পরে আবার চেষ্টা করুন।\nReason: ${lastError ? lastError.message : "No available song"}`,
     threadID
   );
 }
@@ -322,7 +355,6 @@ module.exports.handleEvent = async function ({ api, event }) {
   }
 };
 
-/* ─── Prefix trigger এ কিছুই করবে না (double trigger fix) ─── */
 module.exports.run = async function () {
   return;
 };
