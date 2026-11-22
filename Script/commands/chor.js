@@ -1,125 +1,135 @@
-const axios = require("axios");
-const fs = require("fs-extra");
-const path = require("path");
-
 module.exports.config = {
-  name: "chor", //⚠️ 𝗗𝗼𝗻'𝘁 𝗖𝗵𝗮𝗻𝗴𝗲 𝗡𝗮𝗺𝗲 — 𝗖𝗺𝗱 𝗪𝗶𝗹𝗹 𝗡𝗼𝘁 𝗪𝗼𝗿𝗸✅
-  version: "2.0",
-  hasPermssion: 0,
-  credits: "🔰𝐑𝐀𝐇𝐀𝐓 𝐈𝐒𝐋𝐀𝐌🔰", //⚠️ 𝗗𝗼𝗻'𝘁 𝗖𝗵𝗮𝗻𝗴𝗲 𝗖𝗿𝗲𝗱𝗶𝘁 — 𝗖𝗺𝗱 𝗪𝗼𝗻'𝘁 𝗪𝗼𝗿𝗸✅
-  description: "image generate",
-  commandCategory: "Image",
-  usages: "[@mention/reply/uid/link]",
-  cooldowns: 5
+  name: "chor",
+  version: "1.0.0",
+  hasPermssion: 0, // 0 = সবাই চালাতে পারবে
+  credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
+  description: "chor template memes",
+  commandCategory: "Picture",
+  usages: "[@mention]",
+  cooldowns: 5,
+  dependencies: {
+    "fs-extra": "",
+    "axios": "",
+    "canvas": ""
+  }
 };
 
-const API_JSON_URL = "https://raw.githubusercontent.com/Rahat-Islam10/-Rahat-Boss-/refs/heads/main/api.json";
-async function getUIDByFullName(api, threadID, body) {
-  if (!body.includes("@")) return null;
-  const match = body.match(/@(.+)/);
-  if (!match) return null;
-const targetName = match[1].trim().toLowerCase().replace(/\s+/g, " ");
-  const threadInfo = await api.getThreadInfo(threadID);
-  const users = threadInfo.userInfo || [];
-const user = users.find(u => {
-    if (!u.name) return false;
-    const fullName = u.name.trim().toLowerCase().replace(/\s+/g, " ");
-    return fullName === targetName;
-  });
-return user ? user.id : null;
-}
-async function getApiList(commandName) {
-  const res = await axios.get(API_JSON_URL, { timeout: 15000 });
-  const data = res.data || {};
-  const cmdData = data[commandName];
- if (!cmdData || !cmdData.api) {
-    throw new Error(`❌"${commandName}" API পাওয়া যায়নি`);
-  }
-const apiList = [cmdData.api, ...(cmdData.backupApis || [])].filter(Boolean);
-  if (!apiList.length) {
-    throw new Error(`❌"${commandName}" Api পাওয়া যায়নি`);
-  }
-return apiList;
-}
-async function generateFrameWithFallback({ senderID, mention, credit, apiList }) {
-  let lastError = null;
- for (const baseApi of apiList) {
-    const cleanBase = baseApi.replace(/\/+$/, "");
-    const apiUrl = `${cleanBase}/api/frame?type=chor&senderId=${senderID}&mentionId=${mention}&credit=${encodeURIComponent(credit)}`;
+module.exports.run = async ({ event, api }) => {
+  const fs = global.nodemodule["fs-extra"];
+  const axios = global.nodemodule["axios"];
+  const canvas = global.nodemodule["canvas"];
+
+  // ===== টেমপ্লেট লিস্ট =====
+  // ref = টেমপ্লেট ছবির মাপ, avatar = গোল ফ্রেমের বাম-উপরের কোণ (x, y) আর ব্যাস (size)
+  const TEMPLATES = [
+    {
+      url: "https://i.imgur.com/JZcD39P.jpeg",
+      ref: { w: 1671, h: 941 },
+      avatar: { x: 909, y: 59, size: 132 }
+    }
+  ];
+
+  // ===== ক্যাপসন লিস্ট: প্রতিবার এলোমেলোভাবে একটা বাছাই হবে =====
+  const CAPTIONS = [
+    "আজকে এই টাকা দিয়ে পার্টি করব! 🤣 বিরিয়ানি খাবো, বন্ধুদের নিয়ে ফুর্তি করব! 😎",
+    "টাকা যখন পকেটে চলে এসেছে! 🤑 আজকে আর কোনো দুঃখ-কষ্ট নাই! 😂",
+    "আজকে সব টাকা উড়িয়ে দেব! 🤣 কালকে আবার নতুন শিকার খুঁজব! 😜",
+    "এই টাকা দিয়ে আজকে রাজা হয়ে যাব! 👑 পার্টি হবে সারারাত, বিল দেবে কে? 😂",
+    "আজকে বিরিয়ানি, কালকে কাচ্চি! 🍗 টাকা শেষ হলে আবার বুদ্ধি খাটাবো! 🤣",
+    "জীবনে প্রথম এত টাকা পেলাম! 😍 আজকে বন্ধুদের সবাইকে ট্রিট দেব! 😂",
+    "মালিক এখনো কিছু বুঝতে পারেনি! 🤫 এদিকে আমার পার্টির প্ল্যান রেডি! 🤣",
+    "আজকে টাকা আমার, আনন্দ আমার! 🤑 দুনিয়ার সব চিন্তা আজকে ছুটি! 😎",
+    "এই টাকা দিয়ে আজকে ফুর্তি করব! 😂 কালকে আবার নতুন গল্প শুরু হবে! 🤣",
+    "চুরি করে যখন লাভ হয়েছে! 😁 আজকে পার্টি হবে একদম জমজমাট! 🔥"
+  ];
+  // =====================================================================
+
+  const tpl = TEMPLATES[Math.floor(Math.random() * TEMPLATES.length)];
+  const caption = CAPTIONS[Math.floor(Math.random() * CAPTIONS.length)];
+
+  const cacheDir = __dirname + "/cache";
+  const outputPath = cacheDir + "/chor_" + Date.now() + ".jpg";
+
   try {
-      const response = await axios.get(apiUrl, {
-        timeout: 30000,
-        responseType: 'json'
-      });
-  const data = response.data;
-      if (data.image && data.captionTemplate) {
-        const imageBuffer = Buffer.from(data.image, 'base64');
-        return { imageBuffer, captionTemplate: data.captionTemplate };
-      } else {
-        throw new Error("❌API Error");
-      }
-    } catch (error) {
-      lastError = error;
-      if (error.response?.status === 401 && error.response?.data?.error) {
-        throw new Error(error.response.data.error);
-      }
+    fs.ensureDirSync(cacheDir);
+
+    // মেনশন > রিপ্লাই করা মেসেজের ইউজার > নিজে
+    const targetUserId =
+      Object.keys(event.mentions || {})[0] ||
+      (event.type === "message_reply" && event.messageReply && event.messageReply.senderID) ||
+      event.senderID;
+
+    // কনফিগে থাকা এডমিনদের chor বানানো যাবে না
+    const cfg = global.config || {};
+    const adminList = [].concat(cfg.ADMINBOT || [], cfg.OPERATOR || []).map(String);
+    if (adminList.includes(String(targetUserId))) {
+      return api.sendMessage(
+        "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐ বসকে chor বানা জাবে নারে পাগলা😏🙏",
+        event.threadID,
+        event.messageID
+      );
     }
-  }
- throw lastError || new Error("❌API কাজ করছে না");
-}
-module.exports.run = async function ({ api, event, args }) {
-  try {
-    let mention, mentionName;
-  if (event.type === "message_reply") {
-      mention = event.messageReply.senderID;
-    } else if (args[0]) {
-      if (args[0].includes(".com/")) {
-        mention = await api.getUID(args[0]);
-      } else if (args.join().includes("@")) {
-        mention = Object.keys(event.mentions || {})[0];
-        if (!mention) mention = await getUIDByFullName(api, event.threadID, args.join(" "));
-      } else {
-        mention = args[0];
-      }
-    } else {
-      return api.sendMessage("❌ 𝗣𝗹𝗲𝗮𝘀𝗲 𝗺𝗲𝗻𝘁𝗶𝗼𝗻 𝗮 𝘂𝘀𝗲𝗿", event.threadID, event.messageID);
-    }
-  if (!mention) {
-      return api.sendMessage("❌ 𝗨𝘀𝗲𝗿 𝗻𝗼𝘁 𝗳𝗼𝘂𝗻𝗱 🐸\n𝗣𝗹𝗲𝗮𝘀𝗲 𝗰𝗵𝗲𝗰𝗸 𝗵𝗲𝗿 𝗽𝗿𝗼𝗳𝗶𝗹𝗲", event.threadID, event.messageID);
-    }
-   const userInfo = await api.getUserInfo(mention);
-    mentionName = userInfo[mention]?.name || "Unknown";
-    const senderID = event.senderID;
-    const credit = module.exports.config.credits;
-  const waiting = await api.sendMessage("⏳𝗣𝗹𝗲𝗮𝘀𝗲 𝘄𝗮𝗶𝘁....", event.threadID);
- const apiConfigList = await getApiList(module.exports.config.name);
-    const { imageBuffer, captionTemplate } = await generateFrameWithFallback({
-      senderID,
-      mention,
-      credit,
-      apiList: apiConfigList
+
+    // টেমপ্লেট ছবি
+    const templateRes = await axios.get(tpl.url, {
+      responseType: "arraybuffer",
+      headers: { "User-Agent": "Mozilla/5.0" }
     });
-    const finalCaption = captionTemplate.replace(/{{name}}/g, mentionName);
-    const outPath = path.join(__dirname, `chor_${Date.now()}.png`);
-    fs.writeFileSync(outPath, imageBuffer);
-    await api.unsendMessage(waiting.messageID);
-    const messageInfo = await api.sendMessage(
+    const templateImage = await canvas.loadImage(Buffer.from(templateRes.data));
+
+    // প্রোফাইল ছবি
+    let picData;
+    try {
+      const picRes = await axios.get(
+        `https://graph.facebook.com/${targetUserId}/picture?width=512&height=512&access_token=6628568379%7Cc1e620fa708a1d5696fb991c1bde5662`,
+        { responseType: "arraybuffer", headers: { "User-Agent": "Mozilla/5.0" } }
+      );
+      picData = picRes.data;
+    } catch (e) {
+      // ব্যাকআপ: বটের নিজস্ব getUserInfo থেকে ছবি
+      const info = await new Promise((resolve, reject) =>
+        api.getUserInfo(targetUserId, (err, res) => (err ? reject(err) : resolve(res)))
+      );
+      const thumb = info[targetUserId] && info[targetUserId].thumbSrc;
+      const r2 = await axios.get(thumb, { responseType: "arraybuffer" });
+      picData = r2.data;
+    }
+    const avatar = await canvas.loadImage(Buffer.from(picData));
+
+    const cv = canvas.createCanvas(templateImage.width, templateImage.height);
+    const ctx = cv.getContext("2d");
+    ctx.drawImage(templateImage, 0, 0);
+
+    // টেমপ্লেটের আসল মাপ অনুযায়ী স্কেল
+    const kx = templateImage.width / tpl.ref.w;
+    const ky = templateImage.height / tpl.ref.h;
+    const ax = tpl.avatar.x * kx;
+    const ay = tpl.avatar.y * ky;
+    const as = tpl.avatar.size * kx;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(ax + as / 2, ay + as / 2, as / 2, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+    ctx.drawImage(avatar, ax, ay, as, as);
+    ctx.restore();
+
+    fs.writeFileSync(outputPath, cv.toBuffer("image/jpeg"));
+
+    return api.sendMessage(
       {
-        body: finalCaption,
-        mentions: [{ tag: mentionName, id: mention }],
-        attachment: fs.createReadStream(outPath)
+        body: caption,
+        attachment: fs.createReadStream(outputPath)
       },
       event.threadID,
+      () => {
+        try { fs.unlinkSync(outputPath); } catch (e) {}
+      },
       event.messageID
     );
-  setTimeout(async () => {
-      try {
-        await api.unsendMessage(messageInfo.messageID);
-        fs.unlinkSync(outPath);
-      } catch (e) {}
-    }, 120000);
-
   } catch (error) {
-    return api.sendMessage(`⚠️ ${error.message}`, event.threadID);
+    try { fs.unlinkSync(outputPath); } catch (e) {}
+    return api.sendMessage("Error: " + error.message, event.threadID, event.messageID);
   }
 };
