@@ -1,6 +1,6 @@
 module.exports.config = {
 	name: "adduser",
-	version: "6.0.0",
+	version: "7.0.0",
 	hasPermssion: 0,
 	credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
 	description: "Add user to group by UID or Facebook link (bot admin only)",
@@ -13,6 +13,8 @@ module.exports.config = {
 const axios = require("axios");
 const fs = require("fs-extra");
 const path = require("path");
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 //━━━━━━━━━━━━━━━
 // ✅ GET UID FROM LINK
@@ -50,18 +52,22 @@ async function getUID(url) {
 // ✅ GET NAMES FROM UIDs
 //━━━━━━━━━━━━━━━
 async function getUserNames(api, ids) {
+	const result = {};
+	for (const id of ids) result[id] = "Admin";
 	try {
 		const info = await new Promise((resolve, reject) => {
-			api.getUserInfo(ids, (err, data) => (err ? reject(err) : resolve(data)));
+			let done = false;
+			const t = setTimeout(() => { if (!done) { done = true; reject(new Error("timeout")); } }, 10000);
+			api.getUserInfo(ids, (err, data) => {
+				if (done) return;
+				done = true;
+				clearTimeout(t);
+				err ? reject(err) : resolve(data);
+			});
 		});
-		const result = {};
 		for (const id of ids) result[id] = info?.[id]?.name || "Admin";
-		return result;
-	} catch (e) {
-		const result = {};
-		for (const id of ids) result[id] = "Admin";
-		return result;
-	}
+	} catch (e) {}
+	return result;
 }
 
 //━━━━━━━━━━━━━━━
@@ -88,40 +94,91 @@ function isBotAdmin(senderID) {
 }
 
 //━━━━━━━━━━━━━━━
-// ✅ SAFE getThreadInfo
+// ✅ getThreadInfo (callback + promise দুইভাবেই কাজ করে)
+// আগের কোডের মূল সমস্যা: await api.getThreadInfo(threadID)
+// callback ছাড়া অনেক FCA-তে undefined ফেরত দেয়, তাই সবসময় null আসত।
 //━━━━━━━━━━━━━━━
-async function safeGetThreadInfo(api, threadID) {
-	try {
-		if (typeof api.getThreadInfo === "function") {
-			const info = await api.getThreadInfo(threadID);
-			if (info) return info;
-		}
-	} catch (e) {
-		console.log("[adduser] getThreadInfo failed:", e.message);
-	}
+function getThreadInfo(api, threadID) {
+	return new Promise((resolve) => {
+		let done = false;
+		const finish = (v) => {
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			resolve(v || null);
+		};
+		const timer = setTimeout(() => finish(null), 12000);
 
-	try {
-		if (typeof api.getThreadList === "function") {
-			const list = await api.getThreadList(50, null, ["INBOX"]);
-			const t = list.find(x => x.threadID == threadID);
-			if (t) return t;
+		try {
+			const r = api.getThreadInfo(threadID, (err, info) => {
+				if (err) {
+					console.log("[adduser] getThreadInfo error:", err.message || err);
+					return finish(null);
+				}
+				finish(info);
+			});
+			if (r && typeof r.then === "function") {
+				r.then(finish).catch(() => finish(null));
+			}
+		} catch (e) {
+			console.log("[adduser] getThreadInfo failed:", e.message);
+			finish(null);
 		}
-	} catch (e) {
-		console.log("[adduser] getThreadList failed:", e.message);
-	}
-
-	return null;
+	});
 }
 
 //━━━━━━━━━━━━━━━
-// ✅ CHECK USER IN GROUP (fresh)
+// ✅ addUserToGroup (callback + promise)
+// ⚠️ আগের কোডে আর্গুমেন্ট উল্টো করে দ্বিতীয়বার চেষ্টা করা হতো — সেটা বাদ দেওয়া হয়েছে
+//━━━━━━━━━━━━━━━
+function addUser(api, uid, threadID) {
+	return new Promise((resolve, reject) => {
+		let done = false;
+		const finish = (err) => {
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			err ? reject(err) : resolve();
+		};
+		const timer = setTimeout(() => finish(new Error("Request timeout")), 20000);
+
+		try {
+			const r = api.addUserToGroup(uid, threadID, (err) => finish(err));
+			if (r && typeof r.then === "function") {
+				r.then(() => finish()).catch(finish);
+			}
+		} catch (e) {
+			finish(e);
+		}
+	});
+}
+
+//━━━━━━━━━━━━━━━
+// ✅ CHECK USER IN GROUP (retry সহ)
 // true = আছে | false = নেই | null = যাচাই করা যায়নি
 //━━━━━━━━━━━━━━━
 async function isUserInGroup(api, threadID, uid) {
-	await new Promise(r => setTimeout(r, 3000));
-	const info = await safeGetThreadInfo(api, threadID);
-	if (!info || !Array.isArray(info.participantIDs)) return null;
-	return info.participantIDs.map(String).includes(String(uid));
+	let result = null;
+	for (let i = 0; i < 3; i++) {
+		await sleep(2500);
+		const info = await getThreadInfo(api, threadID);
+		if (info && Array.isArray(info.participantIDs)) {
+			if (info.participantIDs.map(String).includes(String(uid))) return { inGroup: true, info };
+			result = { inGroup: false, info };
+		}
+	}
+	return result || { inGroup: null, info: null };
+}
+
+function parseApproval(info) {
+	if (!info) return false;
+	const v = info.approvalMode;
+	return v === true || v === 1 || v === "true";
+}
+
+function parseAdmins(info) {
+	if (!info) return [];
+	return (info.adminIDs || []).map(e => String(e.id || e));
 }
 
 //━━━━━━━━━━━━━━━
@@ -132,7 +189,7 @@ module.exports.run = async function ({ api, event, args }) {
 	const botID = String(api.getCurrentUserID());
 	const send = (msg) => api.sendMessage(msg, threadID, messageID);
 
-	// ❌ BOT ADMIN CHECK (config.json)
+	// ❌ BOT ADMIN CHECK
 	if (!isBotAdmin(senderID)) {
 		return send(`╭━━━❌ ACCESS DENIED ❌━━━╮
 ┃
@@ -151,25 +208,28 @@ module.exports.run = async function ({ api, event, args }) {
 ╰━━━━━━━━━━━━━━━━━━╯`);
 	}
 
-	const loadingMsg = await api.sendMessage(
-		`╭━━━⏳ PROCESSING ⏳━━━╮
+	const loadingMsg = await new Promise((resolve) => {
+		api.sendMessage(
+			`╭━━━⏳ PROCESSING ⏳━━━╮
 ┃
 ┃ 🔍 User Checking...
 ┃ 📡 Collecting UID...
 ┃ ⚙️ Preparing Add System...
 ╰━━━━━━━━━━━━━━━━━━╯`,
-		threadID
-	);
+			threadID,
+			(err, info) => resolve(err ? null : info)
+		);
+	});
 
 	const removeLoading = () => {
-		try { api.unsendMessage(loadingMsg.messageID); } catch (e) {}
+		try { if (loadingMsg?.messageID) api.unsendMessage(loadingMsg.messageID); } catch (e) {}
 	};
 
 	// UID / LINK
 	let uid;
 	let name = "Facebook User";
 
-	if (!isNaN(args[0])) {
+	if (/^\d+$/.test(args[0])) {
 		uid = String(args[0]);
 		const names = await getUserNames(api, [uid]);
 		name = names[uid] === "Admin" ? "Facebook User" : names[uid];
@@ -186,139 +246,135 @@ module.exports.run = async function ({ api, event, args }) {
 		name = userName;
 	}
 
-	// ✅ THREAD INFO (আগে থেকে: approval mode, admin list, bot admin কিনা)
-	const beforeInfo = await safeGetThreadInfo(api, threadID);
+	// ✅ আগে থেকে গ্রুপে আছে কিনা + approval mode + admin list
+	const beforeInfo = await getThreadInfo(api, threadID);
+	let adminIDs = parseAdmins(beforeInfo);
+	let approvalMode = parseApproval(beforeInfo);
 
-	let adminIDs = [];
-	let approvalMode = false;
-	let isBotAdminInGroup = false;
-
-	if (beforeInfo) {
-		adminIDs = (beforeInfo.adminIDs || []).map(e => String(e.id || e));
-		approvalMode = beforeInfo.approvalMode === true || beforeInfo.approvalMode === 1;
-		isBotAdminInGroup = adminIDs.includes(botID);
-
-		// ALREADY IN GROUP
-		if ((beforeInfo.participantIDs || []).map(String).includes(uid)) {
-			removeLoading();
-			return send(`╭━━━⚠️ USER EXIST ⚠️━━━╮
+	if (beforeInfo && (beforeInfo.participantIDs || []).map(String).includes(uid)) {
+		removeLoading();
+		return send(`╭━━━⚠️ USER EXIST ⚠️━━━╮
 ┃
 ┃ 👤 ${name}
 ┃ 🆔 ${uid}
 ┃
 ┃ আগে থেকেই গ্রুপে আছে।
 ╰━━━━━━━━━━━━━━━━━━╯`);
-		}
 	}
 
 	//━━━━━━━━━━━━━━━
 	// ✅ ADD USER
 	//━━━━━━━━━━━━━━━
 	try {
-		let added = false;
-		let lastErr;
-
-		try {
-			await api.addUserToGroup(uid, threadID);
-			added = true;
-		} catch (e1) {
-			lastErr = e1;
-			try {
-				await api.addUserToGroup(threadID, uid);
-				added = true;
-			} catch (e2) {
-				lastErr = e2;
-			}
-		}
-
+		await addUser(api, uid, threadID);
+	} catch (e) {
 		removeLoading();
+		console.log("[adduser] addUserToGroup error:", e);
+		const reason = String((e && (e.message || e.error || e.errorDescription)) || "Unknown").slice(0, 100);
+		return send(`╭━━━❌ ADD FAILED ❌━━━╮
+┃
+┃ 👤 ${name}
+┃ 🆔 ${uid}
+┃
+┃ ⚠️ ইউজারকে এড করা যায়নি!
+┃
+┃ 📌 সম্ভাব্য কারণ:
+┃ • Profile Locked / Privacy
+┃ • Add Option Off
+┃ • Bot Blocked
+┃ • Invalid UID
+┃ • Group Full
+┃
+┃ 🛠 Error: ${reason}
+╰━━━━━━━━━━━━━━━━━━╯`);
+	}
 
-		if (!added) throw lastErr;
+	// ✅ আসলেই গ্রুপে ঢুকেছে কিনা যাচাই (নতুন info দিয়ে)
+	const { inGroup, info: afterInfo } = await isUserInGroup(api, threadID, uid);
+	removeLoading();
 
-		// ✅ আসলেই গ্রুপে ঢুকেছে কিনা যাচাই
-		const inGroup = await isUserInGroup(api, threadID, uid);
+	if (afterInfo) {
+		approvalMode = approvalMode || parseApproval(afterInfo);
+		const a = parseAdmins(afterInfo);
+		if (a.length) adminIDs = a;
+	}
 
-		// 🎉 সরাসরি অ্যাড হয়ে গেছে
-		if (inGroup === true) {
-			return send(`╭━━━✅ USER ADDED ✅━━━╮
+	// 🎉 সরাসরি অ্যাড হয়ে গেছে
+	if (inGroup === true) {
+		return send(`╭━━━✅ USER ADDED ✅━━━╮
 ┃
 ┃ 👤 Name : ${name}
 ┃ 🆔 UID  : ${uid}
 ┃
 ┃ 🎉 সফলভাবে গ্রুপে এড করা হয়েছে!
 ╰━━━━━━━━━━━━━━━━━━╯`);
-		}
+	}
 
-		// 🔔 APPROVAL চালু → গ্রুপ এডমিনদের মেনশন
-		if (approvalMode) {
-			const admins = adminIDs.filter(id => id !== botID).slice(0, 15);
+	// 🔔 গ্রুপে APPROVAL চালু → এডমিনদের মেনশন করে বলবে অ্যাপ্রুভ করতে
+	if (approvalMode) {
+		const admins = adminIDs.filter(id => id !== botID).slice(0, 15);
 
-			let body = `╭━━━🔔 APPROVAL NEEDED 🔔━━━╮
+		let body = `╭━━━🔔 APPROVAL NEEDED 🔔━━━╮
 ┃
 ┃ 👤 Name : ${name}
 ┃ 🆔 UID  : ${uid}
 ┃
-┃ ✅ বট এই ইউজারকে এড করেছে।
+┃ ✅ ইউজারকে এড করা হয়েছে।
 ┃ ⚠️ গ্রুপে Approval চালু আছে,
-┃ তাই কোনো এডমিন তাকে
-┃ Approve করে এড করে দিন।
+┃ কোনো এডমিন দেখে Approve করুন।
 ╰━━━━━━━━━━━━━━━━━━╯`;
 
-			const mentions = [];
+		const mentions = [];
 
-			if (admins.length > 0) {
-				const names = await getUserNames(api, admins);
-				body += "\n\n👮 Admins:";
-				for (const id of admins) {
-					const tag = "@" + names[id];
-					body += "\n";
-					const fromIndex = body.length;
-					body += tag;
-					mentions.push({ tag, id, fromIndex });
-				}
+		if (admins.length > 0) {
+			const names = await getUserNames(api, admins);
+			body += "\n\n👮 Admins:";
+			for (const id of admins) {
+				const tag = "@" + names[id];
+				body += "\n";
+				const fromIndex = body.length;
+				body += tag;
+				mentions.push({ tag, id, fromIndex });
 			}
-
-			return api.sendMessage({ body, mentions }, threadID, messageID);
 		}
 
-		// ⚠️ APPROVAL বন্ধ, কিন্তু বট এডমিন নয় → জয়েন রিকুয়েস্ট
-		if (!isBotAdminInGroup) {
-			return send(`╭━━━⏳ JOIN REQUEST ⏳━━━╮
+		return api.sendMessage({ body, mentions }, threadID, messageID);
+	}
+
+	// ⚠️ গ্রুপে নেই, approval বন্ধ, বট এডমিন নয় → জয়েন রিকুয়েস্ট
+	if (inGroup === false && !adminIDs.includes(botID)) {
+		return send(`╭━━━⏳ JOIN REQUEST ⏳━━━╮
 ┃
 ┃ 👤 Name : ${name}
 ┃ 🆔 UID  : ${uid}
 ┃
-┃ ✅ Join request পাঠানো হয়েছে।
+┃ ✅ রিকুয়েস্ট পাঠানো হয়েছে।
 ┃ ⚠️ বট এই গ্রুপের এডমিন নয়,
-┃ তাই সরাসরি এড করতে পারেনি।
-╰━━━━━━━━━━━━━━━━━━╯`);
-		}
-
-		// যাচাই করা যায়নি
-		return send(`╭━━━✅ REQUEST SENT ✅━━━╮
-┃
-┃ 👤 Name : ${name}
-┃ 🆔 UID  : ${uid}
-┃
-┃ অ্যাড রিকুয়েস্ট সফল হয়েছে,
-┃ তবে স্ট্যাটাস যাচাই করা যায়নি।
-╰━━━━━━━━━━━━━━━━━━╯`);
-
-	} catch (e) {
-		removeLoading();
-		console.log("[adduser] addUserToGroup error:", e);
-		return send(`╭━━━❌ ADD FAILED ❌━━━╮
-┃
-┃ ⚠️ ইউজারকে এড করা যায়নি!
-┃
-┃ 📌 Possible Reasons:
-┃ • Profile Locked
-┃ • Add Option Off
-┃ • Bot Blocked
-┃ • Invalid UID
-┃ • Bot Not Admin in Group
-┃
-┃ 🛠 Error: ${String((e && (e.message || e.error)) || "Unknown").slice(0, 100)}
+┃ তাই সরাসরি এড হয়নি।
 ╰━━━━━━━━━━━━━━━━━━╯`);
 	}
+
+	// ⚠️ গ্রুপে নেই, কিন্তু কারণ পরিষ্কার না
+	if (inGroup === false) {
+		return send(`╭━━━⏳ PENDING ⏳━━━╮
+┃
+┃ 👤 Name : ${name}
+┃ 🆔 UID  : ${uid}
+┃
+┃ রিকুয়েস্ট পাঠানো হয়েছে, কিন্তু
+┃ ইউজার এখনো গ্রুপে ঢোকেনি।
+┃ (Approval বা ইউজারের privacy
+┃ সেটিংস কারণ হতে পারে)
+╰━━━━━━━━━━━━━━━━━━╯`);
+	}
+
+	// যাচাই করা যায়নি
+	return send(`╭━━━✅ REQUEST SENT ✅━━━╮
+┃
+┃ 👤 Name : ${name}
+┃ 🆔 UID  : ${uid}
+┃
+┃ অ্যাড রিকুয়েস্ট পাঠানো হয়েছে,
+┃ তবে স্ট্যাটাস যাচাই করা যায়নি।
+╰━━━━━━━━━━━━━━━━━━╯`);
 };
