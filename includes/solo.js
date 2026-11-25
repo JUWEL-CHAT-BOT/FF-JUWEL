@@ -1,22 +1,3 @@
-// ══════════════════════════════════════════════
-// Credit : 乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐
-// includes/solo.js — ALLBOT STOP / ALLBOT ON
-//
-//  ★ সব কমান্ড শুধু OWNER_UIDS-এর মানুষ (আপনি) দিতে পারবেন। কোনো বটের ADMINBOT/DEVELOPER পারবে না।
-//  ★ আইডি সাসপেন্ড হলে OWNER_NAMES-এর নামের অ্যাকাউন্ট থেকেও stop/on/status চলবে (setmaster/delmaster না)।
-//
-//    allbot setmaster <বটের uid> → ওই বটকে মাস্টার বানাও। গ্রুপে একবার লিখলে গ্রুপের সব বট জেনে যায়
-//    allbot delmaster <বটের uid> → মাস্টার মুছো
-//    allbot stop [সময়]          → এই গ্রুপে অন্য সব বট চুপ (30m, 2h, 1d, 1h30m; না দিলে ২৪ ঘণ্টা)
-//    allbot on                   → অন্য বট আবার চালু (মাস্টার বট বন্ধ থাকলেও কাজ করে — ফলোয়াররা নিজেই শোনে)
-//    allbot status               → অবস্থা দেখো
-//    বাংলাতেও: অলবট স্টপ / অলবট অন / অলবট স্ট্যাটাস      (প্রিফিক্স দিলেও চলবে: .allbot stop)
-//
-//  অন্য বট: মাস্টারের মার্কার মেসেজ দেখলে ওই গ্রুপে পুরো চুপ। সময় শেষ হলে নিজে থেকেই চালু।
-//  নোটিশ: চুপ হওয়ার সময় প্রতিটা ফলোয়ার বট একটা "BOT OFF" নোটিশ দেয় (কতক্ষণের জন্য, কখন ফিরবে)।
-//         চালু হওয়ার সময় (allbot on বা সময় শেষ) "BOT ON" নোটিশ দেয়। মাস্টার বট এসব নোটিশ দেয় না।
-//  ক্রেডিট বদলালে এই ফিচার কাজ করবে না।
-// ══════════════════════════════════════════════
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
@@ -24,22 +5,22 @@ const crypto = require("crypto");
 /* ★★★ এখানে শুধু আপনার নিজের (মানুষের) Facebook UID বসান — যে অ্যাকাউন্ট থেকে আপনি কমান্ড দেন ★★★
    এটা ফাঁকা থাকলে ফিচার বন্ধ থাকবে। এই কোড সব ইউজারের বটে যাবে, তাই এখানে শুধু আপনার UID রাখুন। */
 const OWNER_UIDS = [
-  // "61596105511947",
-  // "100000000000002",
-  // "100000000000003",
+   "61596105511947",
+   "100000000000002",
+   "100000000000003",
 ];
 
-/* ★ আইডি সাসপেন্ড হলে: নিচের যেকোনো নামের অ্যাকাউন্ট থেকে দেওয়া stop / on / status কমান্ডও মানা হবে।
-   (setmaster / delmaster শুধু OWNER_UIDS পারবে — নাম নকল করা সহজ, তাই এ দুটো নামে খোলা নেই) */
+/* ★ আইডি সাসপেন্ড হলে: নিচের দুটো নামের যেকোনো অ্যাকাউন্ট থেকে দেওয়া সব allbot কমান্ড (stop / on / status / setmaster / delmaster)
+   OWNER_UIDS-এর মতোই মানা হবে। UID বা নাম — যেকোনো একটা মিললেই হবে।
+
+   নাম অবশ্যই ১০০% হুবহু মিলতে হবে: বড়/ছোট হাতের অক্ষর, প্রতিটি অক্ষর, সংখ্যা, সিম্বল, স্পেস — একটাও কম/বেশি হলে মিলবে না।
+   (একমাত্র ছাড়: এপোস্ট্রফির ধরন ' ’ ʼ একই ধরা হয়, আর অদৃশ্য ক্যারেক্টার উপেক্ষা করা হয়) */
 const OWNER_NAMES = [
-  "Juwel AhameD'z",
-  "Juwel Ahmed",
-  "Juwel Ahamed",
   "Juwel AhmeD'z",
   "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
 ];
 /* মাস্টার বট stop/on দিলে নিজের ফ্রেম-নোটিশ দেবে কি না (false = শুধু ছোট সংকেত মেসেজ, নোটিশ দেয় ফলোয়াররা) */
-const MASTER_NOTICE = false;
+const MASTER_NOTICE = true;
 
 /* ঐচ্ছিক: মাস্টার বটের UID কোডে দিতে চাইলে। না দিলে "allbot setmaster <uid>" কমান্ড যথেষ্ট */
 const MASTER_UIDS = [
@@ -96,30 +77,54 @@ function isOwner(id) {
   return OWNER_UIDS.map(String).filter(Boolean).includes(String(id));
 }
 
-/* ───────────── নাম দিয়ে চেনা ───────────── */
-const normName = n => String(n || "").normalize("NFC").replace(/[\u2018\u2019\u02BC`]/g, "'").replace(/\s+/g, " ").trim().toLowerCase();
-const OWNER_NAMES_N = OWNER_NAMES.map(normName).filter(Boolean);
-const nameCache = new Map(); // uid → { name, at }
+/* ───────────── নাম দিয়ে চেনা ─────────────
+   exactKey: হুবহু তুলনা — case-sensitive, কোনো অক্ষর/সংখ্যা/সিম্বল বাদ যায় না।
+   শুধু এপোস্ট্রফির ধরন এক করা হয়, অদৃশ্য ক্যারেক্টার বাদ দেওয়া হয় ও বাড়তি স্পেস এক স্পেস করা হয়। */
+const exactKey = n => String(n || "")
+  .normalize("NFC")
+  .replace(/\p{Cf}/gu, "")
+  .replace(/[\u2018\u2019\u02BC\u2032`]/g, "'")
+  .replace(/\s+/g, " ")
+  .trim();
+
+const OWNER_NAMES_X = new Set(OWNER_NAMES.map(exactKey).filter(Boolean));
+const hasNameOwners = () => OWNER_NAMES_X.size > 0;
+
+const nameCache = new Map(); // uid → { names, at }
 const NAME_TTL = 5 * 60 * 1000;
 
-function getSenderName(api, uid) {
+function getSenderNames(api, uid) {
   return new Promise(resolve => {
+    const c = nameCache.get(uid);
+    if (c && Date.now() - c.at < NAME_TTL) return resolve(c.names);
+    let done = false;
+    const local = () => {
+      try { return global.data && global.data.userName && global.data.userName.get(String(uid)); }
+      catch (_) { return ""; }
+    };
+    const fin = list => {
+      if (done) return;
+      done = true;
+      const names = list.filter(Boolean);
+      if (names.length) nameCache.set(uid, { names, at: Date.now() });
+      resolve(names);
+    };
+    setTimeout(() => fin([local()]), 6000);
     try {
-      const c = nameCache.get(uid);
-      if (c && Date.now() - c.at < NAME_TTL) return resolve(c.name);
-      let done = false;
-      const fin = n => { if (done) return; done = true; if (n) nameCache.set(uid, { name: n, at: Date.now() }); resolve(n || ""); };
-      setTimeout(() => fin(""), 6000);
       api.getUserInfo(uid, (err, res) => {
-        const n = !err && res && res[uid] && res[uid].name;
-        fin(n || (global.data && global.data.userName && global.data.userName.get(String(uid))) || "");
+        const u = !err && res && (res[uid] || res[String(uid)]);
+        fin([u && u.name, u && u.alternateName, local()]);
       });
-    } catch (_) { resolve(""); }
+    } catch (_) { fin([local()]); }
   });
 }
+
 async function isOwnerByName(api, uid) {
-  if (!OWNER_NAMES_N.length) return false;
-  return OWNER_NAMES_N.includes(normName(await getSenderName(api, String(uid))));
+  if (!hasNameOwners()) return false;
+  const names = await getSenderNames(api, String(uid));
+  const ok = names.some(n => OWNER_NAMES_X.has(exactKey(n)));
+  if (!ok && names.length) console.log("[ALLBOT] name mismatch → " + JSON.stringify(names));
+  return ok;
 }
 function isMasterUid(id) { return masters().includes(String(id)); }
 function isMasterBot(api) {
@@ -137,12 +142,27 @@ function isSolo(threadID) {
 let apiRef = null;
 let rawSend = null; // গার্ডের আগের আসল sendMessage — চুপ অবস্থাতেও নোটিশ পাঠাতে পারে
 
+/* নোটিশ পাঠানোর সময় ওই থ্রেডে গার্ড খোলা থাকে (power.js-এর bypass-এর মতো)।
+   কারণ: sendMessage ভেতরে async ভাবে আবার গার্ড করা মেথড কল করতে পারে; তখন থ্রেড চুপ হয়ে গেছে বলে OFF নোটিশ আটকে যেত।
+   নোটিশ পাঠানো শেষ (callback) বা ১৫ সেকেন্ড পর গার্ড আবার বন্ধ। */
+const noticeBypass = new Map(); // threadID → count
+const bypassOn = tid => (noticeBypass.get(String(tid)) || 0) > 0;
 function notify(text, threadID) {
+  const key = String(threadID);
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    const n = (noticeBypass.get(key) || 1) - 1;
+    if (n > 0) noticeBypass.set(key, n); else noticeBypass.delete(key);
+  };
   try {
     if (!apiRef || !creditOk()) return;
+    noticeBypass.set(key, (noticeBypass.get(key) || 0) + 1);
+    setTimeout(release, 15000).unref();
     const fn = rawSend || apiRef.sendMessage.bind(apiRef);
-    fn(text, threadID, () => {});
-  } catch (e) { console.log("[ALLBOT] notice error:", e.message); }
+    fn(text, threadID, release);
+  } catch (e) { release(); console.log("[ALLBOT] notice error:", e.message); }
 }
 
 function offNotice(tid, until) {
@@ -151,8 +171,7 @@ function offNotice(tid, until) {
   notify(frame("🔴 BOT OFF ⛔", [
     "💤 This bot is now silent here",
     "⏳ Off for: " + fmt(rem),
-    "🕒 Back at: " + stamp(until),
-    "🔓 Owner can resume anytime"
+    "🕒 Back at: " + stamp(until)
   ]), tid);
 }
 function onNotice(tid, auto) {
@@ -211,6 +230,7 @@ function norm(body) {
   let t = String(body || "").trim().replace(/\s+/g, " ").toLowerCase();
   const prefix = String((global.config && global.config.PREFIX) || ".").toLowerCase();
   if (prefix && t.startsWith(prefix)) t = t.slice(prefix.length).trim();
+  t = t.replace(/^[^\p{L}\p{N}]+/u, "");   // শুরুর যেকোনো সিম্বল (/ . ! # ইত্যাদি) বাদ
   return t;
 }
 
@@ -256,6 +276,14 @@ function masterSetup(api, event, cmd) {
   let me = "";
   try { me = String(api.getCurrentUserID()); } catch (_) {}
   const mine = !!uid && uid === me;
+  // "allbot delmaster" (UID ছাড়া) → সেভ করা সব মাস্টার মুছে দেয়; যে বট মাস্টার ছিল সে-ই রিপ্লাই দেয়
+  if (cmd.type === "delmaster" && !uid) {
+    const wasMaster = isMasterBot(api);
+    state.masters = [];
+    save();
+    if (wasMaster) send(api, frame("🗑️ MASTER REMOVED", ["👑 No master bot now", "🔇 Next stop silences ALL bots"]), event.threadID, event.messageID);
+    return;
+  }
   if (!uid) {
     send(api, frame("⚠️ ALLBOT ERROR", ["Usage: allbot setmaster <uid>"]), event.threadID, event.messageID);
     return;
@@ -282,6 +310,18 @@ function releaseThread(tid) {
   }
 }
 
+/* ───────────── ফলোয়ার (মাস্টার নয় এমন) বট: OWNER-এর "allbot stop" নিজেই শুনে চুপ হয় ─────────────
+   মাস্টার সেট থাকুক বা না থাকুক — মাস্টার বট বাদে বাকি সব বট এই গ্রুপে চুপ হবে */
+function followerStop(tid, arg) {
+  const ms = parseDuration(arg);
+  const until = Date.now() + ms;
+  if (isSolo(tid) && Math.abs(state.threads[tid].until - until) < 15000) return; // একই কমান্ড দুইবার না
+  offNotice(tid, until); // আগে নোটিশ, তারপর চুপ (নোটিশ আসল sendMessage দিয়ে যায়)
+  state.threads[tid] = { until, at: Date.now() };
+  save();
+  console.log("[ALLBOT] " + tid + " → চুপ, " + stamp(until) + " পর্যন্ত (OWNER-এর কমান্ডে)");
+}
+
 /* ───────────── মাস্টার বটের কমান্ড ───────────── */
 function masterCommand(api, event, cmd) {
   const tid = String(event.threadID);
@@ -290,12 +330,11 @@ function masterCommand(api, event, cmd) {
     const until = Date.now() + ms;
     state.threads[tid] = { until, at: Date.now() };
     save();
-    const marker = "⟦allbot:stop:" + until + "⟧";
+    const marker = "⟦allbot:stop:" + until + "⟧"; // পুরোনো ফলোয়ার বটের জন্য ফলব্যাক
     send(api, MASTER_NOTICE ? frame("🔒 ALLBOT STOP ⛔", [
       "🔇 Other bots: silent here",
       "⏳ Duration: " + fmt(ms),
-      "🕒 Ends at: " + stamp(until),
-      "🔓 Resume early: allbot on"
+      "🕒 Ends at: " + stamp(until)
     ], marker) : marker, event.threadID);
   } else if (cmd.type === "on") {
     delete state.threads[tid];
@@ -327,21 +366,17 @@ function gate(api, event) {
     const cmd0 = isMsg ? parseCmd(norm(event.body)) : null;
     if (cmd0) {
       const hasUid = OWNER_UIDS.map(String).filter(Boolean).length > 0;
-      if (!hasUid && !OWNER_NAMES_N.length) return false;               // OWNER দেওয়া নেই → ফিচার বন্ধ
-      if (isOwner(event.senderID)) {                                    // UID মিললে সব কমান্ড
+      if (!hasUid && !hasNameOwners()) return false;                    // OWNER দেওয়া নেই → ফিচার বন্ধ
+      // OWNER (UID অথবা নাম) মিললে একই কাজ হবে — দুটোর মধ্যে কোনো পার্থক্য নেই
+      const runOwnerCmd = () => {
         if (cmd0.type === "setmaster" || cmd0.type === "delmaster") masterSetup(api, event, cmd0);
-        else if (isMasterBot(api)) masterCommand(api, event, cmd0);
-        else if (cmd0.type === "on") releaseThread(tid);                // ফলোয়ার বট নিজেই চালু হয়
-        return true;
-      }
-      // UID মেলেনি: শুধু মাস্টার বট নাম যাচাই করবে, তাও শুধু stop/on/status-এর জন্য
-      if (cmd0.type !== "setmaster" && cmd0.type !== "delmaster") {
-        if (isMasterBot(api)) {
-          isOwnerByName(api, event.senderID).then(ok => { if (ok) masterCommand(api, event, cmd0); }).catch(() => {});
-        } else if (cmd0.type === "on" && isSolo(tid)) {                 // ফলোয়ার: চুপ থাকলেই নাম যাচাই করে
-          isOwnerByName(api, event.senderID).then(ok => { if (ok) releaseThread(tid); }).catch(() => {});
-        }
-      }
+        else if (isMasterBot(api)) masterCommand(api, event, cmd0);   // মাস্টার বট: কখনো চুপ হয় না
+        else if (cmd0.type === "stop") followerStop(tid, cmd0.arg);   // বাকি সব বট: মাস্টার থাকুক বা না থাকুক চুপ
+        else if (cmd0.type === "on") releaseThread(tid);              // বাকি সব বট: চালু
+      };
+      console.log("[ALLBOT] cmd '" + cmd0.type + "' from " + event.senderID + " | uid-owner=" + isOwner(event.senderID) + " | master-bot=" + isMasterBot(api) + " | masters=" + masters().length);
+      if (isOwner(event.senderID)) { runOwnerCmd(); return true; }      // UID মিললে সাথে সাথে
+      isOwnerByName(api, event.senderID).then(ok => { if (ok) runOwnerCmd(); }).catch(() => {}); // নাম মিললেও
       return true;                                                      // বাকি সবার জন্য চুপচাপ বাদ
     }
 
@@ -354,7 +389,7 @@ function gate(api, event) {
       if (m) {
         if (m[1] === "stop") {
           const until = Math.min(parseInt(m[2], 10), Date.now() + MAX_MS);
-          if (until > Date.now()) {
+          if (until > Date.now() && !(isSolo(tid) && Math.abs(state.threads[tid].until - until) < 15000)) { // OWNER-এর কমান্ডে আগেই চুপ হয়ে থাকলে আবার নোটিশ নয়
             offNotice(tid, until); // আগে নোটিশ, তারপর চুপ (নোটিশ আসল sendMessage দিয়ে যায়)
             state.threads[tid] = { until, at: Date.now() };
             save();
@@ -387,7 +422,7 @@ function guardApi(api) {
     const idx = GUARDED[name];
     api[name] = function (...args) {
       const tid = args[idx];
-      if (creditOk() && (typeof tid === "string" || typeof tid === "number") && !isMasterBot(api) && isSolo(tid)) {
+      if (creditOk() && (typeof tid === "string" || typeof tid === "number") && !isMasterBot(api) && isSolo(tid) && !bypassOn(tid)) {
         const cb = args.find(a => typeof a === "function");
         if (cb) { try { cb(null, { allbotStopped: true }); } catch (_) {} }
         return Promise.resolve({ allbotStopped: true });
