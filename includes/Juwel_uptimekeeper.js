@@ -13,8 +13,8 @@
 //   ২) RAILWAY_VOLUME_MOUNT_PATH        — Railway Volume যোগ করলে অটো সেট হয়
 //   ৩) RENDER_DISK_PATH                 — Render Disk
 //   ৪) UPSTASH_REDIS_REST_URL + _TOKEN  — ফ্রি Redis (Volume ছাড়া রিডিপ্লয়েও টিকে থাকে)
-//   ৫) Telegram (অটো, কোনো সেটআপ লাগে না) — config.json-এর JUWEL_ALERT (TG_TOKEN + TG_CHAT)
-//        থাকলেই চ্যাটে একটা পিন করা মেসেজে সময় সেভ হয়; Volume ছাড়াই রিডিপ্লয়ে টিকে থাকে
+//   ৫) Telegram বটের description (অটো) — JUWEL_ALERT-এর TG_TOKEN থাকলেই সময় সেভ হয়;
+//        চ্যাটে কোনো মেসেজ/নোটিফিকেশন যায় না; Volume ছাড়াই রিডিপ্লয়ে টিকে থাকে
 //   ৬) Script/commands/cache            — শুধু একই কন্টেইনারে রিস্টার্টে টিকে (রিডিপ্লয়ে না)
 //
 // ENV: UPTIME_GRACE_MIN (ডিফল্ট 5)
@@ -51,7 +51,7 @@ if (global.__uptimeKeeper) {
 } else {
   const GRACE_MS = (Number(process.env.UPTIME_GRACE_MIN) > 0 ? Number(process.env.UPTIME_GRACE_MIN) : 5) * 60 * 1000;
   const BEAT_MS = 15 * 1000;
-  const REMOTE_BEAT_MS = 60 * 1000;
+  const REMOTE_BEAT_MS = (process.env.UPTIME_TG_BEAT_SEC > 0 ? Number(process.env.UPTIME_TG_BEAT_SEC) : 120) * 1000;
 
   const VOLUME_DIR = process.env.UPTIME_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || process.env.RENDER_DISK_PATH || "";
   const DIR = VOLUME_DIR || path.join(__dirname, "..", "Script", "commands", "cache");
@@ -71,7 +71,7 @@ if (global.__uptimeKeeper) {
       TG_CHAT = TG_CHAT || String(c.TG_CHAT || "").trim();
     } catch (_) {}
   }
-  const useTg = !useRedis && !!(TG_TOKEN && TG_CHAT) && String(process.env.UPTIME_TG || "").toLowerCase() !== "off";
+  const useTg = !useRedis && !!TG_TOKEN && String(process.env.UPTIME_TG || "").toLowerCase() !== "off";
   const useRemote = useRedis || useTg;
 
   let startedAt = Date.now();
@@ -109,39 +109,29 @@ if (global.__uptimeKeeper) {
     }).then((r) => r.data && r.data.result);
   }
 
-  // ---- Telegram স্টোর: পিন করা একটা মেসেজই "ডাটাবেস" ----
+  // ---- Telegram স্টোর: চ্যাটে কোনো মেসেজ যায় না, নোটিফিকেশনও না ----
+  // সময়টা বটের নিজের "description" ফিল্ডে সেভ হয় (setMyDescription / getMyDescription)
   const TG_TAG = "JWUP|";
-  let tgMsgId = 0, tgBusy = false;
+  const DEPLOY_ID = String(process.env.RAILWAY_SERVICE_ID || process.env.RENDER_SERVICE_ID || process.env.RAILWAY_PROJECT_ID || "x").slice(0, 12);
+  let tgBusy = false;
   function tgApi(method, body) {
     const axios = require("axios");
-    return axios.post("https://api.telegram.org/bot" + TG_TOKEN + "/" + method, body, { timeout: 8000 })
+    return axios.post("https://api.telegram.org/bot" + TG_TOKEN + "/" + method, body || {}, { timeout: 8000 })
       .then((r) => r.data && r.data.result);
   }
   async function tgGet() {
-    const c = await tgApi("getChat", { chat_id: TG_CHAT });
-    const t = c && c.pinned_message && c.pinned_message.text;
-    if (typeof t === "string" && t.indexOf(TG_TAG) !== -1) {
-      tgMsgId = c.pinned_message.message_id;
-      return t.slice(t.indexOf(TG_TAG) + TG_TAG.length);
-    }
-    return null;
+    const r = await tgApi("getMyDescription");
+    const t = r && r.description;
+    if (typeof t !== "string" || t.indexOf(TG_TAG) === -1) return null;
+    const o = JSON.parse(t.slice(t.indexOf(TG_TAG) + TG_TAG.length));
+    return o && o.id === DEPLOY_ID ? JSON.stringify(o) : null; // অন্য ডিপ্লয়ের ডাটা নেব না
   }
   async function tgSet(str) {
     if (tgBusy) return;
     tgBusy = true;
     try {
-      const text = "⏱ 𝚄𝙿𝚃𝙸𝙼𝙴 𝙺𝙴𝙴𝙿𝙴𝚁 • 𝙳𝙾 𝙽𝙾𝚃 𝙳𝙴𝙻𝙴𝚃𝙴\n" + TG_TAG + str;
-      if (tgMsgId) {
-        try { await tgApi("editMessageText", { chat_id: TG_CHAT, message_id: tgMsgId, text }); return; }
-        catch (e) {
-          const d = e && e.response && e.response.data && e.response.data.description || "";
-          if (/not modified/i.test(d)) return;
-          tgMsgId = 0; // মেসেজ মুছে গেছে → নতুন করে বানাব
-        }
-      }
-      const m = await tgApi("sendMessage", { chat_id: TG_CHAT, text, disable_notification: true });
-      tgMsgId = m && m.message_id || 0;
-      if (tgMsgId) await tgApi("pinChatMessage", { chat_id: TG_CHAT, message_id: tgMsgId, disable_notification: true }).catch(() => {});
+      const o = JSON.parse(str); o.id = DEPLOY_ID;
+      await tgApi("setMyDescription", { description: "⏱ 𝚄𝙿𝚃𝙸𝙼𝙴 𝙺𝙴𝙴𝙿𝙴𝚁\n" + TG_TAG + JSON.stringify(o) });
     } finally { tgBusy = false; }
   }
 
@@ -217,4 +207,4 @@ if (global.__uptimeKeeper) {
     reset,
     wasRestored: () => restored
   };
-}
+      }
