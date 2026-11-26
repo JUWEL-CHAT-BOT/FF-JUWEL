@@ -9,15 +9,15 @@ const audioUrls = [
   "https://files.catbox.moe/z96wll.mp3"
 ];
 
-// ⏱️ কুলডাউন: ২ ঘন্টা (মিলিসেকেন্ডে)
-const COOLDOWN_MS = 2 * 60 * 60 * 1000;
+// ⏱️ কুলডাউন: ১০ ঘন্টা (মিলিসেকেন্ডে)
+const COOLDOWN_MS = 10 * 60 * 60 * 1000;
 
-// প্রতিটি থ্রেডের শেষ ব্যবহারের সময়
+// প্রতিটি ইউজারের (সব গ্রুপ মিলিয়ে) শেষ ব্যবহারের সময়
 const lastUsed = new Map();
 
 module.exports.config = {
   name: "auto_voice",
-  version: "1.1.0",
+  version: "1.2.0",
   hasPermission: 0,
   credits: "乛 M𝆠፝֟R ཐི༏ཋྀ JU𝆠፝֟W𝆠፝֟ELꜛཐི༏ཋྀ࿐",
   description: "Auto voice reply",
@@ -33,10 +33,8 @@ module.exports.handleEvent = async function ({ api, event }) {
     // বটের নিজের মেসেজ ইগনোর
     if (event.senderID === api.getCurrentUserID()) return;
 
-    // বড় হাতের/ছোট হাতের সব লেখা (I LOVE YOU, i love you) একই ভাবে ধরবে
     const msg = event.body.toLowerCase().trim();
 
-    // ✅ মেসেজের যেকোনো জায়গায় ট্রিগার থাকলেই কাজ করবে
     const isTriggered = triggers.some(t => msg.includes(t.toLowerCase()));
     if (!isTriggered) return;
 
@@ -44,8 +42,8 @@ module.exports.handleEvent = async function ({ api, event }) {
     const adminList = (global.config && global.config.ADMINBOT) || [];
     const isAdmin = adminList.map(String).includes(String(event.senderID));
 
-    // ⏱️ এডমিন না হলে কুলডাউন চেক
-    const key = event.threadID;
+    // ⏱️ এডমিন না হলে ইউজার-ভিত্তিক কুলডাউন চেক
+    const key = String(event.senderID);
     const now = Date.now();
 
     if (!isAdmin) {
@@ -65,7 +63,7 @@ module.exports.handleEvent = async function ({ api, event }) {
         timeout: 15000
       });
     } catch (e) {
-      // ডাউনলোড ফেল করলে কুলডাউন রিসেট
+      // ডাউনলোড ফেল করলে ওই ইউজারের কুলডাউন রিসেট
       if (!isAdmin) lastUsed.delete(key);
       throw e;
     }
