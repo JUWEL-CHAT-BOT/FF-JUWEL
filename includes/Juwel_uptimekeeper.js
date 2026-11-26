@@ -13,7 +13,9 @@
 //   ২) RAILWAY_VOLUME_MOUNT_PATH        — Railway Volume যোগ করলে অটো সেট হয়
 //   ৩) RENDER_DISK_PATH                 — Render Disk
 //   ৪) UPSTASH_REDIS_REST_URL + _TOKEN  — ফ্রি Redis (Volume ছাড়া রিডিপ্লয়েও টিকে থাকে)
-//   ৫) Script/commands/cache            — শুধু একই কন্টেইনারে রিস্টার্টে টিকে (রিডিপ্লয়ে না)
+//   ৫) Telegram (অটো, কোনো সেটআপ লাগে না) — config.json-এর JUWEL_ALERT (TG_TOKEN + TG_CHAT)
+//        থাকলেই চ্যাটে একটা পিন করা মেসেজে সময় সেভ হয়; Volume ছাড়াই রিডিপ্লয়ে টিকে থাকে
+//   ৬) Script/commands/cache            — শুধু একই কন্টেইনারে রিস্টার্টে টিকে (রিডিপ্লয়ে না)
 //
 // ENV: UPTIME_GRACE_MIN (ডিফল্ট 5)
 // ══════════════════════════════════════════════
@@ -60,8 +62,20 @@ if (global.__uptimeKeeper) {
   const REDIS_KEY = "bot:uptime_state";
   const useRedis = !!(REDIS_URL && REDIS_TOKEN);
 
+  // ---- Telegram (অটো): env অথবা config.json -> JUWEL_ALERT ----
+  let TG_TOKEN = process.env.JUWEL_TG_TOKEN || "", TG_CHAT = process.env.JUWEL_TG_CHAT || "";
+  if (!TG_TOKEN || !TG_CHAT) {
+    try {
+      const c = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "config.json"), "utf8")).JUWEL_ALERT || {};
+      TG_TOKEN = TG_TOKEN || String(c.TG_TOKEN || "").trim();
+      TG_CHAT = TG_CHAT || String(c.TG_CHAT || "").trim();
+    } catch (_) {}
+  }
+  const useTg = !useRedis && !!(TG_TOKEN && TG_CHAT) && String(process.env.UPTIME_TG || "").toLowerCase() !== "off";
+  const useRemote = useRedis || useTg;
+
   let startedAt = Date.now();
-  let remoteReady = !useRedis; // Redis থেকে পুরনো মান পড়া শেষ না হওয়া পর্যন্ত Redis-এ লিখব না
+  let remoteReady = !useRemote; // Redis থেকে পুরনো মান পড়া শেষ না হওয়া পর্যন্ত Redis-এ লিখব না
   let lastRemoteBeat = 0;
 
   const isFresh = (s) => {
@@ -83,7 +97,7 @@ if (global.__uptimeKeeper) {
   function writeLocal() {
     try {
       fs.mkdirSync(DIR, { recursive: true });
-      fs.writeFileSync(FILE, snapshot());
+      fs.writeFileSync(FILE, JSON.stringify({ startedAt, lastAlive: Date.now(), restored, store: useRedis ? "Redis" : useTg ? "Telegram" : VOLUME_DIR ? "Volume" : "Local" }));
     } catch (_) {}
   }
 
@@ -95,15 +109,53 @@ if (global.__uptimeKeeper) {
     }).then((r) => r.data && r.data.result);
   }
 
+  // ---- Telegram স্টোর: পিন করা একটা মেসেজই "ডাটাবেস" ----
+  const TG_TAG = "JWUP|";
+  let tgMsgId = 0, tgBusy = false;
+  function tgApi(method, body) {
+    const axios = require("axios");
+    return axios.post("https://api.telegram.org/bot" + TG_TOKEN + "/" + method, body, { timeout: 8000 })
+      .then((r) => r.data && r.data.result);
+  }
+  async function tgGet() {
+    const c = await tgApi("getChat", { chat_id: TG_CHAT });
+    const t = c && c.pinned_message && c.pinned_message.text;
+    if (typeof t === "string" && t.indexOf(TG_TAG) !== -1) {
+      tgMsgId = c.pinned_message.message_id;
+      return t.slice(t.indexOf(TG_TAG) + TG_TAG.length);
+    }
+    return null;
+  }
+  async function tgSet(str) {
+    if (tgBusy) return;
+    tgBusy = true;
+    try {
+      const text = "⏱ 𝚄𝙿𝚃𝙸𝙼𝙴 𝙺𝙴𝙴𝙿𝙴𝚁 • 𝙳𝙾 𝙽𝙾𝚃 𝙳𝙴𝙻𝙴𝚃𝙴\n" + TG_TAG + str;
+      if (tgMsgId) {
+        try { await tgApi("editMessageText", { chat_id: TG_CHAT, message_id: tgMsgId, text }); return; }
+        catch (e) {
+          const d = e && e.response && e.response.data && e.response.data.description || "";
+          if (/not modified/i.test(d)) return;
+          tgMsgId = 0; // মেসেজ মুছে গেছে → নতুন করে বানাব
+        }
+      }
+      const m = await tgApi("sendMessage", { chat_id: TG_CHAT, text, disable_notification: true });
+      tgMsgId = m && m.message_id || 0;
+      if (tgMsgId) await tgApi("pinChatMessage", { chat_id: TG_CHAT, message_id: tgMsgId, disable_notification: true }).catch(() => {});
+    } finally { tgBusy = false; }
+  }
+
+  function remoteGet() { return useRedis ? redis(["GET", REDIS_KEY]) : tgGet(); }
+
   function writeRemote() {
-    if (!useRedis || !remoteReady) return;
+    if (!useRemote || !remoteReady) return;
     lastRemoteBeat = Date.now();
-    redis(["SET", REDIS_KEY, snapshot()]).catch(() => {});
+    (useRedis ? redis(["SET", REDIS_KEY, snapshot()]) : tgSet(snapshot())).catch(() => {});
   }
 
   // ---- Redis থেকে পড়া (অ্যাসিঙ্ক) ----
-  if (useRedis) {
-    redis(["GET", REDIS_KEY]).then((v) => {
+  if (useRemote) {
+    remoteGet().then((v) => {
       try {
         const s = v ? JSON.parse(v) : null;
         if (isFresh(s) && (!restored || Number(s.startedAt) < startedAt)) {
@@ -112,7 +164,7 @@ if (global.__uptimeKeeper) {
         }
       } catch (_) {}
     }).catch((e) => {
-      console.log("[UPTIME] Redis পড়া যায়নি: " + (e && e.message));
+      console.log("[UPTIME] রিমোট পড়া যায়নি: " + (e && e.message));
     }).then(() => {
       remoteReady = true;
       writeLocal();
@@ -122,13 +174,13 @@ if (global.__uptimeKeeper) {
 
   function beat() {
     writeLocal();
-    if (useRedis && Date.now() - lastRemoteBeat >= REMOTE_BEAT_MS) writeRemote();
+    if (useRemote && Date.now() - lastRemoteBeat >= REMOTE_BEAT_MS) writeRemote();
   }
 
   function reset(ts) {
     startedAt = ts || Date.now();
     beat();
-    if (useRedis) { lastRemoteBeat = 0; writeRemote(); }
+    if (useRemote) { lastRemoteBeat = 0; writeRemote(); }
   }
 
   writeLocal();
@@ -139,12 +191,12 @@ if (global.__uptimeKeeper) {
   process.uptime = () => (Date.now() - startedAt) / 1000;
   process.__powerUptimePatched = true;
 
-  const persistent = !!VOLUME_DIR || useRedis;
+  const persistent = !!VOLUME_DIR || useRemote;
   const ago = () => Math.round((Date.now() - startedAt) / 1000);
   console.log(
     "[UPTIME] " + (restored ? "আগের আপটাইম ধরে রাখা হয়েছে (" + ago() + "s)" : "নতুন আপটাইম শুরু") +
-    " | সেভ: " + (useRedis ? "Redis" : DIR) +
-    (persistent ? "" : " | ⚠️ রিডিপ্লয়ে টিকবে না — Railway Volume বা UPSTASH_REDIS যোগ করুন")
+    " | সেভ: " + (useRedis ? "Redis" : useTg ? "Telegram" : DIR) +
+    (persistent ? "" : " | ⚠️ রিডিপ্লয়ে টিকবে না — config.json-এ JUWEL_ALERT (TG) দিন")
   );
 
   // Railway-তে Volume না থাকলে লগে সহজ ধাপ দেখানো (ইউজাররা যাতে নিজেরাই ঠিক করতে পারে)
